@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terrahawk"
+version = "1.0.0"
+description = "Bird's eye view of your infra — Terragrunt infrastructure scanner"
+requires-python = ">=3.9"
+
+[project.scripts]
+terrahawk = "terrahawk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+terrahawk = ["templates/*.html", "templates/*.svg"]

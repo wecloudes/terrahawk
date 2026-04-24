@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terrahawk Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--text-muted:#8b949e;--text-dim:#484f58;--green:#3fb950;--green-bg:#12261e;--green-border:#1a4028;--red:#f85149;--red-bg:#2d1214;--red-border:#5a1d23;--yellow:#d29922;--yellow-bg:#2a2013;--yellow-border:#4d3a12;--blue:#58a6ff;--blue-bg:#0d2138;--blue-border:#1a3a5c;--cyan:#39d2c0;--orange:#e8863a;--hover:#1c2128;--diff-add-bg:#12261e;--diff-add-text:#3fb950;--diff-del-bg:#2d1214;--diff-del-text:#f85149;--diff-change-bg:#2d1a08;--diff-change-text:#e8863a}
+[data-theme="light"]{--bg:#fff;--surface:#f6f8fa;--border:#d0d7de;--text:#1f2328;--text-muted:#656d76;--text-dim:#8b949e;--green:#1a7f37;--green-bg:#dafbe1;--green-border:#aceebb;--red:#cf222e;--red-bg:#ffebe9;--red-border:#ffcecb;--yellow:#9a6700;--yellow-bg:#fff8c5;--yellow-border:#f5e0a0;--blue:#0969da;--blue-bg:#ddf4ff;--blue-border:#b6e3ff;--cyan:#0a8a7a;--orange:#bc4c00;--hover:#f0f2f5;--diff-add-bg:#dafbe1;--diff-add-text:#1a7f37;--diff-del-bg:#ffebe9;--diff-del-text:#cf222e;--diff-change-bg:#fff8c5;--diff-change-text:#9a6700}
+.state-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap}
+.state-fresh,.state-30,.state-90,.state-180{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border)}
+.header-layout{position:relative;min-height:100px}
+.eagle-icon{height:100px;position:absolute;left:0;top:50%;transform:translateY(-50%);filter:invert(1)}
+[data-theme="light"] .eagle-icon{filter:none}
+.header-text{text-align:center}
+mark.hl{background:var(--yellow);color:var(--bg);padding:0 2px;border-radius:2px}
+[data-theme="light"] mark.hl{background:#fff8c5;color:#1f2328}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+.container{max-width:1400px;margin:0 auto;padding:24px}
+.header{text-align:center;padding:32px 0;border-bottom:1px solid var(--border);margin-bottom:24px}
+.header h1{font-size:28px;font-weight:700;margin-bottom:8px}.header h2{font-family:'Roboto',sans-serif;font-weight:300}.header .meta{color:var(--text-muted);font-size:14px}
+.info-btn{position:absolute;top:16px;right:16px;background:var(--surface);border:1px solid var(--border);color:var(--blue);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;transition:all .15s}.info-btn:hover{border-color:var(--blue);background:var(--blue-bg)}
+.about-content{font-size:14px;line-height:1.8}.about-content h4{color:var(--text);margin:16px 0 8px;font-size:14px}.about-content p{color:var(--text-muted);text-align:justify}
+.about-content .ver-table{width:100%;border-collapse:collapse;margin:8px 0}.about-content .ver-table td{padding:5px 10px;border-bottom:1px solid var(--border);font-size:13px}
+.about-content .ver-table .tool-name{color:var(--text);font-weight:500}.about-content .ver-table .tool-ver{color:var(--cyan);font-family:'Roboto Mono',monospace;text-align:right}
+.about-content .ver-table .tool-dis{color:var(--text-dim);font-style:italic;text-align:right}
+.about-footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--border);text-align:center;color:var(--text-muted);font-size:13px}.about-footer strong{color:var(--text)}
+.stats{display:grid;gap:16px;margin-bottom:24px}.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;text-align:center}
+.stat-card .number{font-size:36px;font-weight:700}.stat-card .label{font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.stat-total .number{color:var(--blue)}.stat-clean .number{color:var(--green)}.stat-drift .number{color:var(--yellow)}.stat-error .number{color:var(--red)}
+.cov-container{margin-bottom:24px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px}
+.cov-container h3{font-size:14px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.cov-bar{height:24px;border-radius:6px;overflow:hidden;display:flex;background:var(--border)}.cov-bar .seg-clean{background:var(--green)}.cov-bar .seg-drift{background:var(--yellow)}.cov-bar .seg-error{background:var(--red)}
+.cov-legend{display:flex;gap:24px;margin-top:10px;font-size:13px;color:var(--text-muted)}
+.cov-legend span::before{content:'';display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.legend-clean::before{background:var(--green)!important}.legend-drift::before{background:var(--yellow)!important}.legend-error::before{background:var(--red)!important}
+.filters{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;align-items:center;position:sticky;top:0;z-index:100;background:var(--bg);padding:12px 0;border-bottom:1px solid var(--border)}
+.filter-group{display:flex;gap:4px}
+.filter-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-muted);padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;transition:all .15s}
+.filter-btn:hover{border-color:var(--text-muted);color:var(--text)}.filter-btn.active{background:var(--hover);border-color:var(--cyan);color:var(--cyan)}
+.filter-btn .count{margin-left:4px;opacity:.7}
+.toggle-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-muted);padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;transition:all .15s}
+.toggle-btn:hover{border-color:var(--text-muted);color:var(--text)}.toggle-btn.on{background:var(--hover);border-color:var(--cyan);color:var(--cyan)}
+.search-input{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:20px;font-size:13px;flex:1;min-width:200px;outline:none}
+.search-input:focus{border-color:var(--blue)}
+select.filter-select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;outline:none}
+.sub-section{margin-bottom:16px}.sub-header{background:var(--surface);border:1px solid var(--border);border-radius:8px 8px 0 0;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.sub-header:hover{background:var(--hover)}.sub-header h2{font-size:16px;font-weight:600;display:flex;align-items:center;gap:10px}
+.sub-header .arrow{transition:transform .2s;font-size:12px;color:var(--text-muted)}.sub-header.collapsed .arrow{transform:rotate(-90deg)}
+.sub-badges{display:flex;gap:8px;flex-wrap:wrap}.badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+.badge-clean{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.badge-drift{background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow-border)}
+.badge-error{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+.badge-sec-fail{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+.sub-body{border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;overflow:hidden}.sub-body.hidden{display:none}
+.unit-row{display:flex;align-items:center;padding:10px 20px;border-bottom:1px solid var(--border);font-size:14px;transition:background .1s}
+.unit-row:last-child{border-bottom:none}.unit-row:hover{background:var(--hover)}.unit-row.has-diff{cursor:pointer}
+.unit-status{width:28px;flex-shrink:0;font-size:16px}
+.unit-path{flex:1;font-family:'Roboto Mono',monospace;font-size:13px}.unit-path .app-name{color:var(--text);font-weight:500}.unit-path .path-prefix{color:var(--text-dim)}
+.unit-summary{font-size:12px;color:var(--text-muted);margin-left:16px;flex-shrink:0;font-family:'Roboto Mono',monospace}
+.unit-actions{display:flex;gap:6px;margin-left:12px;flex-shrink:0;align-items:center}
+.act-btn{background:var(--bg);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:12px;cursor:pointer;font-size:11px;transition:all .15s;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.act-btn:hover{border-color:var(--text-muted);color:var(--text);background:var(--hover)}
+.act-btn .act-icon{font-size:13px}
+.act-tag{color:var(--blue)}.act-diag{color:var(--green)}.act-info{color:var(--text-muted)}.act-plan{color:var(--yellow)}
+.plan-count{display:inline-block;font-size:11px;padding:3px 10px;border-radius:10px;font-weight:600;margin-right:6px}
+.plan-act{display:inline-block;font-size:11px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap}
+.plan-add{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.plan-del{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+.plan-upd{background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow-border)}
+.plan-rep{background:var(--diff-change-bg);color:var(--diff-change-text);border:1px solid var(--border)}
+.plan-read{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border)}
+.plan-type{color:var(--cyan);font-family:'Roboto Mono',monospace;font-size:12px;white-space:nowrap}
+.plan-addr{color:var(--text);font-family:'Roboto Mono',monospace;font-size:12px;word-break:break-all}
+.plan-row{cursor:pointer}
+.plan-row:hover>td{background:var(--hover)}
+.plan-row .plan-caret{display:inline-block;width:10px;color:var(--text-muted);font-size:10px;transition:transform .12s;margin-right:6px}
+.plan-row.open .plan-caret{transform:rotate(90deg)}
+.plan-body-row{display:none}
+.plan-body-row.open{display:table-row}
+.plan-body-row>td{padding:0 !important;background:var(--bg);border-bottom:1px solid var(--border) !important}
+.plan-body-row .diff-content{margin:0;padding:12px 16px;max-height:400px;overflow:auto;cursor:pointer}
+.plan-popup{width:760px;max-width:100%;min-height:520px;display:flex;flex-direction:column}
+.plan-popup #plan-table-wrap{flex:1;min-height:420px}
+.plan-filters{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.plan-filters .filter-select{min-width:200px}
+.ms-wrap{position:relative;display:inline-block}
+.ms-toggle{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;text-align:left;min-width:200px}
+.ms-toggle:hover{border-color:var(--text-muted)}
+.ms-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px;min-width:280px;max-width:360px;max-height:320px;overflow-y:auto;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+.ms-panel.open{display:block}
+.ms-actions{padding:4px 8px 8px;border-bottom:1px solid var(--border);margin-bottom:6px;font-size:12px;color:var(--text-muted)}
+.ms-actions a{color:var(--blue);cursor:pointer;text-decoration:none}.ms-actions a:hover{text-decoration:underline}
+.ms-options{display:flex;flex-direction:column;gap:2px}
+.ms-opt{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:13px}
+.ms-opt:hover{background:var(--hover)}
+.ms-opt input{margin:0;accent-color:var(--cyan)}
+.ms-opt .ms-name{flex:1;color:var(--text);font-family:'Roboto Mono',monospace;font-size:12px}
+.ms-opt .ms-count{color:var(--text-muted);font-size:11px;background:var(--hover);padding:1px 8px;border-radius:8px;font-weight:500}
+.unit-expand{width:24px;flex-shrink:0;text-align:right;color:var(--text-dim);font-size:12px}
+.unit-row.status-clean .unit-status::after{content:'\2713';color:var(--green)}
+.unit-row.status-drift .unit-status::after{content:'\21BB';color:var(--yellow);font-weight:700}
+.unit-row.status-error .unit-status::after{content:'\2717';color:var(--red)}
+.unit-row.status-timeout .unit-status::after{content:'\23F1';color:var(--orange)}
+.badge-timeout{background:#2d1a08;color:var(--orange);border:1px solid #5a3410}
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;position:relative;display:flex;flex-direction:column}
+.modal-box.modal-diagram{width:95vw;height:92vh}
+.modal-box.modal-info{width:95vw;max-height:90vh}.modal-box.modal-compact{width:auto;min-width:500px;max-width:1400px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-header h3{font-size:16px;color:var(--text);margin:0;flex:1}
+.modal-controls{display:flex;align-items:center;gap:8px}
+.modal-controls button{background:var(--bg);border:1px solid var(--border);color:var(--text-muted);width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.modal-controls button:hover{border-color:var(--text-muted);color:var(--text)}
+.modal-controls .zoom-label{font-size:12px;color:var(--text-muted);min-width:40px;text-align:center;font-family:'Roboto Mono',monospace}
+.modal-close{background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:18px;color:var(--text-muted);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;width:32px;height:32px;margin-left:8px;line-height:1}
+.modal-close:hover{color:var(--text);border-color:var(--text-muted)}
+.modal-body{padding:20px;overflow-y:auto;flex:1}
+.modal-body table{width:100%;border-collapse:collapse}
+.modal-body th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.modal-body td{padding:6px 10px;border-bottom:1px solid var(--border);font-size:13px}
+.modal-body tr:last-child td{border-bottom:none}
+.modal-body .tag-key{color:var(--blue);font-family:'Roboto Mono',monospace;font-size:12px}
+.modal-body .tag-val{color:var(--text)}
+.modal-body .res-name{color:var(--text)}
+.modal-body .sub-res{padding-left:24px;color:var(--text-muted);font-size:12px}
+.modal-body .sev-critical{color:#ff4444;font-weight:700}.modal-body .sev-high{color:var(--red);font-weight:600}.modal-body .sev-medium{color:var(--orange)}.modal-body .sev-low{color:var(--yellow)}.modal-body .sev-unknown{color:var(--text-muted)}
+.modal-body .no-data{color:var(--text-dim);padding:20px;text-align:center;font-style:italic}
+.diagram-viewport{flex:1;overflow:hidden;position:relative;cursor:grab}
+.diagram-viewport.grabbing{cursor:grabbing}
+.diagram-canvas{position:absolute;top:0;left:0;transform-origin:0 0;transition:none}
+.diagram-canvas svg{display:block}
+.diff-panel{display:none;background:var(--bg);border-bottom:1px solid var(--border);padding:0;overflow-x:auto;max-height:600px;overflow-y:auto}.diff-panel.open{display:block}
+.diff-content{font-family:'Roboto Mono',monospace;font-size:12px;line-height:1.6;padding:16px 20px;white-space:pre-wrap;word-break:break-word}
+.diff-content .line-add{color:var(--diff-add-text);background:var(--diff-add-bg);display:block;padding:0 4px;margin:0 -4px}
+.diff-content .line-del{color:var(--diff-del-text);background:var(--diff-del-bg);display:block;padding:0 4px;margin:0 -4px}
+.diff-content .line-change{color:var(--diff-change-text);background:var(--diff-change-bg);display:block;padding:0 4px;margin:0 -4px}
+.diff-content .line-header{color:var(--cyan);font-weight:600;display:block;margin-top:8px}.diff-content .line-info{color:var(--text-muted);display:block}
+.error-content{font-family:'Roboto Mono',monospace;font-size:12px;color:var(--red);padding:16px 20px;white-space:pre-wrap}
+.panel-sep{border-top:1px dashed var(--border);margin:8px 0}
+.hidden-col{display:none!important}
+@media(max-width:768px){.stats{grid-template-columns:repeat(2,1fr)!important}.filters{flex-direction:column}.unit-summary,.unit-security{display:none}}
+</style></head><body>
+<div class="container">
+<div class="header" style="position:relative"><div class="header-layout"><img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/Pgo8IURPQ1RZUEUgc3ZnIFBVQkxJQyAiLS8vVzNDLy9EVEQgU1ZHIDIwMDEwOTA0Ly9FTiIKICJodHRwOi8vd3d3LnczLm9yZy9UUi8yMDAxL1JFQy1TVkctMjAwMTA5MDQvRFREL3N2ZzEwLmR0ZCI+CjxzdmcgdmVyc2lvbj0iMS4wIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciCiB3aWR0aD0iNTg3LjAwMDAwMHB0IiBoZWlnaHQ9IjU0OC4wMDAwMDBwdCIgdmlld0JveD0iMCAwIDU4Ny4wMDAwMDAgNTQ4LjAwMDAwMCIKIHByZXNlcnZlQXNwZWN0UmF0aW89InhNaWRZTWlkIG1lZXQiPgo8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLjAwMDAwMCw1NDguMDAwMDAwKSBzY2FsZSgwLjEwMDAwMCwtMC4xMDAwMDApIgpmaWxsPSIjMDAwMDAwIiBzdHJva2U9Im5vbmUiPgo8cGF0aCBkPSJNMjQ4MCA1MTkwIGMtMjE3IC0zOCAtNTE2IC04OSAtNjY1IC0xMTQgLTE0OCAtMjYgLTMyMSAtNTYgLTM4NCAtNjgKbC0xMTMgLTIxIC00NSAtNzEgYy0yNSAtMzkgLTk5IC0xNTYgLTE2NCAtMjU5IC02NiAtMTAzIC0xMTkgLTE5MSAtMTE5IC0xOTUKMCAtNCA0NSAtMzAgMTAwIC01NyA1NSAtMjcgMTAwIC01NSAxMDAgLTYyIDAgLTYgLTQzIC0xMjQgLTk2IC0yNjAgLTUzIC0xMzYKLTExNCAtMjkzIC0xMzQgLTM0OCAtNTUgLTE0NCAtMTI1IC0zMjggLTIyMyAtNTgwIC00NDIgLTExNDMgLTQxMyAtMTA2NSAtNDAwCi0xMDY1IDQgMCAxMzYgNzEgMjkzIDE1OCAxNTcgODggMjg2IDE1OCAyODggMTU3IDEgLTEgLTM0IC0xNTAgLTc4IC0zMzEgLTQ1Ci0xODEgLTEwMSAtNDEyIC0xMjYgLTUxNCAtMjUgLTEwMiAtNDggLTE5NCAtNTEgLTIwNCAtNCAtMTUgLTIgLTE4IDEzIC0xMiAxOAo3IDMxNCAxOTEgNTc5IDM1OSBsMTQ5IDk1IDQxIC0zNiBjODEgLTcyIDcxMCAtNjc5IDEzMTAgLTEyNjUgNzIgLTcwIDEzNQotMTI3IDE0MCAtMTI3IDUgMCA4MSA3MSAxNzAgMTU4IDg4IDg2IDIzMCAyMjUgMzE1IDMwNyA4NiA4MyAzMDYgMjk2IDQ5MCA0NzUKNDcyIDQ1OCA1MDEgNDg1IDUxMCA0ODMgNCAtMSA3MCAtNDIgMTQ2IC05MCAyNTggLTE2NCA1ODIgLTM2MyA1OTIgLTM2MyA3IDAKLTE1NCA2NzEgLTIzOCA5ODkgLTExIDQxIC0xOCA3NiAtMTcgNzcgMiAyIDEwOCAtNTYgMjM3IC0xMjcgMTI5IC03MiAyNjEKLTE0NCAyOTMgLTE2MCA1OCAtMzAgNTkgLTMwIDUyIC03IC03IDIxIC0yMzAgNjA2IC0zMzAgODYzIC0yMyA2MSAtMTMzIDM0NAotMjQzIDYzMCAtMTEwIDI4NiAtMjE5IDU2NyAtMjQxIDYyNCAtMjMgNTggLTQxIDExMCAtNDEgMTE3IDAgNiA0MyAzMyA5NiA2MAo1MiAyNiA5NyA1MSA5OSA1NCA0IDYgLTI2MyA0NDIgLTMwOSA1MDYgLTE3IDI0IC0xMyAyMyAtNDU2IDk5IC0zMjUgNTUgLTEwODYKMTg0IC0xMTIwIDE4OSAtMTQgMiAtMjAzIC0yNyAtNDIwIC02NHogbS05MTAgLTEwMTIgYzM2IC0yMCAxMDYgLTU4IDE1NSAtODUKbDkwIC00OCAxIC03NSBjMCAtOTEgMjYgLTE0OCA4MiAtMTg0IDc2IC01MCAxNjcgLTQzIDI0MSAyMCBsMzkgMzQgNjYgLTM3CmMzNiAtMjAgNjYgLTQwIDY2IC00NCAwIC0xNCAtMTU4IC0xNDMgLTIwMCAtMTYzIC0zMyAtMTUgLTY1IC0yMSAtMTIwIC0yMQotNjUgMCAtODQgNCAtMTQxIDMyIC0xNDIgNzAgLTIxMSAxOTMgLTIzNCA0MTYgLTYgNTMgLTEyIDY0IC02OCAxMjkgLTM0IDM5Ci01NyA2OSAtNTIgNjcgNiAtMiAzOSAtMjEgNzUgLTQxeiBtMjY2MSAtMjkgYy00MSAtNDcgLTYxIC03OSAtNjIgLTk3IC01Ci0yMTggLTkyIC0zNzkgLTI0NCAtNDQ4IC0xNDEgLTY1IC0yNTAgLTM3IC00MDUgMTA0IC02MyA1NyAtNjQgNTMgMzUgMTA2IGw1NAozMCA0MCAtMzcgYzE0MSAtMTI3IDMzMyAtMjMgMzE5IDE3MyBsLTQgNjAgMTQ1IDgxIGM4MCA0NSAxNTAgODUgMTU2IDkwIDUgNQoxMyA5IDE4IDkgNSAwIC0xOSAtMzIgLTUyIC03MXogbS0xMTUxIC0zNDkgYzkxIC02NyAxNzAgLTEyNSAxNzYgLTEyOCA1IC00CjQ1IC0xMDggODcgLTIzMSA0MiAtMTI0IDgwIC0yMjggODQgLTIzMiA1IC0zIDk2IC0zMiAyMDMgLTY0IDEwNyAtMzEgMjQyIC03MQozMDAgLTg5IGwxMDUgLTMzIC03MCAtMjAgYy0zOCAtMTIgLTEzNyAtNDAgLTIxOSAtNjIgbC0xNDkgLTQyIC05NiAtODMgYy0xMjUKLTExMCAtMjAwIC0xODkgLTI0NyAtMjYyIC0yMSAtMzIgLTk0IC0xNzEgLTE2MiAtMzA5IC02OCAtMTM3IC0xMjEgLTI0MyAtMTE5Ci0yMzUgMiA4IDQwIDEyMSA4NSAyNTAgbDgwIDIzNSAxMDkgMTcwIGM2MCA5NCAxMTUgMTgwIDEyMSAxOTEgMTAgMTkgMCAzOQotNzMgMTU5IC00NyA3NSAtODUgMTQxIC04NSAxNDUgMCA1IDIwIDM5IDQ0IDc2IGw0NSA2OCAtNjEgNjggYy0zMyAzNyAtNjQgNzAKLTY4IDczIC01IDMgLTEyIC0zNiAtMTYgLTg2IGwtNyAtOTEgLTQyIDY5IGMtMjQgMzcgLTgwIDEyNiAtMTI1IDE5NiAtNzkgMTIzCi04NCAxMjggLTEwMCAxMTAgLTE1IC0xNSAtMTM3IC0yMDMgLTIxNyAtMzMzIC0yMSAtMzQgLTIyIC0zNCAtMjcgLTEwIC0zIDE0Ci03IDQ5IC05IDc4IC0yIDI5IC02IDU1IC05IDU4IC02IDUgLTEyMCAtMTEwIC0xMjYgLTEyNiAtMiAtNCAxOCAtNDAgNDMgLTc5Cmw0NiAtNzIgLTg2IC0xMzUgYy03NyAtMTIxIC04NiAtMTM5IC03NiAtMTYwIDYgLTEzIDYxIC0xMDEgMTIyIC0xOTYgbDExMgotMTczIDc4IC0yMzkgYzQ0IC0xMzIgNzkgLTI0MiA3OSAtMjQ1IDAgLTMgLTU0IDEwMiAtMTE4IDIzNCAtNjUgMTMyIC0xMzUKMjY3IC0xNTYgMzAwIC00NSA3MSAtMTI0IDE1NCAtMjU3IDI3MSAtMTA2IDkyIC05OCA4OCAtMzU5IDE1OSAtMTkzIDUyIC0xODEKNDcgLTEzNSA2MSAxMzcgNDMgNTUyIDE2NCA1NjEgMTY0IDEwIDAgMzcgNzQgMTQ0IDM5MyAxNiA0NiAzMiA3NSA0OSA4NyAxNAoxMCAxMDAgNzMgMTkwIDEzOSAxMDAgNzMgMTY5IDExNyAxNzUgMTEyIDYgLTUgODUgLTYzIDE3NiAtMTMxeiIvPgo8L2c+Cjwvc3ZnPgo=" alt="" class="eagle-icon"><div class="header-text"><h1 style="font-size:28px;font-weight:700;margin-bottom:4px">Terrahawk</h1><h2 style="font-size:16px;font-weight:400;color:var(--text-muted)">Bird's eye view of your infra</h2></div></div><div class="meta" id="meta"></div>
+<button class="info-btn" onclick="toggleTheme()" title="Toggle theme" id="theme-btn" style="right:60px">&#x263E;</button>
+<button class="info-btn" onclick="showAbout()" title="About Terrahawk">&#x2139;</button>
+</div>
+<div class="stats" id="stats"></div>
+<div class="cov-container"><h3>Unit Status</h3><div class="cov-bar" id="cov-bar"></div>
+<div class="cov-legend"><span class="legend-clean">Clean</span><span class="legend-drift">Drift</span><span class="legend-error">Error</span></div></div>
+<div class="filters">
+<div class="filter-group" id="sf"></div>
+<select class="filter-select" id="sub-filter"><option value="all">All subscriptions</option></select>
+<input type="text" class="search-input" id="search" placeholder="Search units...">
+<select class="filter-select" id="tag-key-filter" style="display:none"><option value="">Tag key...</option></select>
+<select class="filter-select" id="tag-val-filter" style="display:none" disabled><option value="">Tag value...</option></select>
+<select class="filter-select" id="sort-select"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="resources">Sort: Resources</option></select>
+<button class="filter-btn" onclick="clearFilters()" title="Clear all filters" style="color:var(--red)">&#x2715;</button>
+<div class="filter-group" style="margin-left:auto;display:flex;gap:4px">
+<button class="filter-btn" onclick="exportCSV()" title="Export data as CSV" style="color:var(--cyan)">&#x2913; CSV</button>
+<button class="filter-btn" onclick="showModulesSummary()" title="Modules summary" style="color:var(--green)">&#x1f4e6;</button>
+<span id="toggle-group" style="display:flex;gap:4px"></span>
+</div>
+</div>
+<div id="results"></div>
+</div>
+<div class="modal-overlay" id="diagram-modal" onclick="if(event.target===this)closeModal('diagram-modal')">
+<div class="modal-box modal-diagram">
+<div class="modal-header"><h3 id="diagram-title"></h3>
+<div class="modal-controls">
+<button onclick="diagramZoom(-0.2)" title="Zoom out">&minus;</button>
+<span class="zoom-label" id="zoom-label">100%</span>
+<button onclick="diagramZoom(0.2)" title="Zoom in">+</button>
+<button onclick="diagramFit()" title="Fit to view">&square;</button>
+<button class="modal-close" onclick="closeModal('diagram-modal')">&times;</button>
+</div></div>
+<div class="diagram-viewport" id="diagram-viewport"><div class="diagram-canvas" id="diagram-canvas"></div></div>
+</div></div>
+<div class="modal-overlay" id="info-modal" onclick="if(event.target===this)closeModal('info-modal')">
+<div class="modal-box modal-info">
+<div class="modal-header"><h3 id="info-title"></h3><button class="modal-close" onclick="closeModal('info-modal')">&times;</button></div>
+<div class="modal-body" id="info-body"></div>
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:false,theme:'dark',maxTextSize:100000,flowchart:{useMaxWidth:false,htmlLabels:true,nodeSpacing:30,rankSpacing:50}});
+const DIAGRAM_STYLES_DARK=[
+  'classDef addCls fill:#12261e,stroke:#3fb950,color:#3fb950',
+  'classDef updCls fill:#2d1a08,stroke:#e8863a,color:#e8863a',
+  'classDef delCls fill:#2d1214,stroke:#f85149,color:#f85149',
+  'classDef repCls fill:#2d1a08,stroke:#d29922,color:#d29922',
+  'classDef readCls fill:#0d2138,stroke:#58a6ff,color:#58a6ff',
+  'classDef stableCls fill:#161b22,stroke:#30363d,color:#8b949e',
+  'classDef dataCls fill:#0d2138,stroke:#1a3a5c,color:#58a6ff,stroke-dasharray:5 5',
+];
+const DIAGRAM_STYLES_LIGHT=[
+  'classDef addCls fill:#dcfce7,stroke:#16a34a,color:#15803d',
+  'classDef updCls fill:#fff7ed,stroke:#ea580c,color:#c2410c',
+  'classDef delCls fill:#fef2f2,stroke:#dc2626,color:#b91c1c',
+  'classDef repCls fill:#fefce8,stroke:#ca8a04,color:#a16207',
+  'classDef readCls fill:#eff6ff,stroke:#2563eb,color:#1d4ed8',
+  'classDef stableCls fill:#f9fafb,stroke:#d1d5db,color:#6b7280',
+  'classDef dataCls fill:#eff6ff,stroke:#93c5fd,color:#2563eb,stroke-dasharray:5 5',
+];
+function themeDiagram(mmd){
+  const isDark=(document.documentElement.getAttribute('data-theme')||'dark')!=='light';
+  const styles=isDark?DIAGRAM_STYLES_DARK:DIAGRAM_STYLES_LIGHT;
+  const stripped=mmd.replace(/^\s*classDef\s+\S+\s+.*$/gm,'');
+  const firstNL=stripped.indexOf('\n');
+  return stripped.slice(0,firstNL+1)+'  '+styles.join('\n  ')+'\n'+stripped.slice(firstNL+1);
+}
+</script>
+<script src="%%DATA_FILE%%"></script>
+<script>
+const DATA=window.TERRAHAWK_DATA||[];
+const REPORT_DATE='%%REPORT_DATE%%';
+const HAS_DIAGRAMS=%%HAS_DIAGRAMS%%;
+const HAS_TAGS=%%HAS_TAGS%%;
+const VERSIONS=%%VERSIONS%%;
+const EAGLE_URI='data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/Pgo8IURPQ1RZUEUgc3ZnIFBVQkxJQyAiLS8vVzNDLy9EVEQgU1ZHIDIwMDEwOTA0Ly9FTiIKICJodHRwOi8vd3d3LnczLm9yZy9UUi8yMDAxL1JFQy1TVkctMjAwMTA5MDQvRFREL3N2ZzEwLmR0ZCI+CjxzdmcgdmVyc2lvbj0iMS4wIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciCiB3aWR0aD0iNTg3LjAwMDAwMHB0IiBoZWlnaHQ9IjU0OC4wMDAwMDBwdCIgdmlld0JveD0iMCAwIDU4Ny4wMDAwMDAgNTQ4LjAwMDAwMCIKIHByZXNlcnZlQXNwZWN0UmF0aW89InhNaWRZTWlkIG1lZXQiPgo8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLjAwMDAwMCw1NDguMDAwMDAwKSBzY2FsZSgwLjEwMDAwMCwtMC4xMDAwMDApIgpmaWxsPSIjMDAwMDAwIiBzdHJva2U9Im5vbmUiPgo8cGF0aCBkPSJNMjQ4MCA1MTkwIGMtMjE3IC0zOCAtNTE2IC04OSAtNjY1IC0xMTQgLTE0OCAtMjYgLTMyMSAtNTYgLTM4NCAtNjgKbC0xMTMgLTIxIC00NSAtNzEgYy0yNSAtMzkgLTk5IC0xNTYgLTE2NCAtMjU5IC02NiAtMTAzIC0xMTkgLTE5MSAtMTE5IC0xOTUKMCAtNCA0NSAtMzAgMTAwIC01NyA1NSAtMjcgMTAwIC01NSAxMDAgLTYyIDAgLTYgLTQzIC0xMjQgLTk2IC0yNjAgLTUzIC0xMzYKLTExNCAtMjkzIC0xMzQgLTM0OCAtNTUgLTE0NCAtMTI1IC0zMjggLTIyMyAtNTgwIC00NDIgLTExNDMgLTQxMyAtMTA2NSAtNDAwCi0xMDY1IDQgMCAxMzYgNzEgMjkzIDE1OCAxNTcgODggMjg2IDE1OCAyODggMTU3IDEgLTEgLTM0IC0xNTAgLTc4IC0zMzEgLTQ1Ci0xODEgLTEwMSAtNDEyIC0xMjYgLTUxNCAtMjUgLTEwMiAtNDggLTE5NCAtNTEgLTIwNCAtNCAtMTUgLTIgLTE4IDEzIC0xMiAxOAo3IDMxNCAxOTEgNTc5IDM1OSBsMTQ5IDk1IDQxIC0zNiBjODEgLTcyIDcxMCAtNjc5IDEzMTAgLTEyNjUgNzIgLTcwIDEzNQotMTI3IDE0MCAtMTI3IDUgMCA4MSA3MSAxNzAgMTU4IDg4IDg2IDIzMCAyMjUgMzE1IDMwNyA4NiA4MyAzMDYgMjk2IDQ5MCA0NzUKNDcyIDQ1OCA1MDEgNDg1IDUxMCA0ODMgNCAtMSA3MCAtNDIgMTQ2IC05MCAyNTggLTE2NCA1ODIgLTM2MyA1OTIgLTM2MyA3IDAKLTE1NCA2NzEgLTIzOCA5ODkgLTExIDQxIC0xOCA3NiAtMTcgNzcgMiAyIDEwOCAtNTYgMjM3IC0xMjcgMTI5IC03MiAyNjEKLTE0NCAyOTMgLTE2MCA1OCAtMzAgNTkgLTMwIDUyIC03IC03IDIxIC0yMzAgNjA2IC0zMzAgODYzIC0yMyA2MSAtMTMzIDM0NAotMjQzIDYzMCAtMTEwIDI4NiAtMjE5IDU2NyAtMjQxIDYyNCAtMjMgNTggLTQxIDExMCAtNDEgMTE3IDAgNiA0MyAzMyA5NiA2MAo1MiAyNiA5NyA1MSA5OSA1NCA0IDYgLTI2MyA0NDIgLTMwOSA1MDYgLTE3IDI0IC0xMyAyMyAtNDU2IDk5IC0zMjUgNTUgLTEwODYKMTg0IC0xMTIwIDE4OSAtMTQgMiAtMjAzIC0yNyAtNDIwIC02NHogbS05MTAgLTEwMTIgYzM2IC0yMCAxMDYgLTU4IDE1NSAtODUKbDkwIC00OCAxIC03NSBjMCAtOTEgMjYgLTE0OCA4MiAtMTg0IDc2IC01MCAxNjcgLTQzIDI0MSAyMCBsMzkgMzQgNjYgLTM3CmMzNiAtMjAgNjYgLTQwIDY2IC00NCAwIC0xNCAtMTU4IC0xNDMgLTIwMCAtMTYzIC0zMyAtMTUgLTY1IC0yMSAtMTIwIC0yMQotNjUgMCAtODQgNCAtMTQxIDMyIC0xNDIgNzAgLTIxMSAxOTMgLTIzNCA0MTYgLTYgNTMgLTEyIDY0IC02OCAxMjkgLTM0IDM5Ci01NyA2OSAtNTIgNjcgNiAtMiAzOSAtMjEgNzUgLTQxeiBtMjY2MSAtMjkgYy00MSAtNDcgLTYxIC03OSAtNjIgLTk3IC01Ci0yMTggLTkyIC0zNzkgLTI0NCAtNDQ4IC0xNDEgLTY1IC0yNTAgLTM3IC00MDUgMTA0IC02MyA1NyAtNjQgNTMgMzUgMTA2IGw1NAozMCA0MCAtMzcgYzE0MSAtMTI3IDMzMyAtMjMgMzE5IDE3MyBsLTQgNjAgMTQ1IDgxIGM4MCA0NSAxNTAgODUgMTU2IDkwIDUgNQoxMyA5IDE4IDkgNSAwIC0xOSAtMzIgLTUyIC03MXogbS0xMTUxIC0zNDkgYzkxIC02NyAxNzAgLTEyNSAxNzYgLTEyOCA1IC00CjQ1IC0xMDggODcgLTIzMSA0MiAtMTI0IDgwIC0yMjggODQgLTIzMiA1IC0zIDk2IC0zMiAyMDMgLTY0IDEwNyAtMzEgMjQyIC03MQozMDAgLTg5IGwxMDUgLTMzIC03MCAtMjAgYy0zOCAtMTIgLTEzNyAtNDAgLTIxOSAtNjIgbC0xNDkgLTQyIC05NiAtODMgYy0xMjUKLTExMCAtMjAwIC0xODkgLTI0NyAtMjYyIC0yMSAtMzIgLTk0IC0xNzEgLTE2MiAtMzA5IC02OCAtMTM3IC0xMjEgLTI0MyAtMTE5Ci0yMzUgMiA4IDQwIDEyMSA4NSAyNTAgbDgwIDIzNSAxMDkgMTcwIGM2MCA5NCAxMTUgMTgwIDEyMSAxOTEgMTAgMTkgMCAzOQotNzMgMTU5IC00NyA3NSAtODUgMTQxIC04NSAxNDUgMCA1IDIwIDM5IDQ0IDc2IGw0NSA2OCAtNjEgNjggYy0zMyAzNyAtNjQgNzAKLTY4IDczIC01IDMgLTEyIC0zNiAtMTYgLTg2IGwtNyAtOTEgLTQyIDY5IGMtMjQgMzcgLTgwIDEyNiAtMTI1IDE5NiAtNzkgMTIzCi04NCAxMjggLTEwMCAxMTAgLTE1IC0xNSAtMTM3IC0yMDMgLTIxNyAtMzMzIC0yMSAtMzQgLTIyIC0zNCAtMjcgLTEwIC0zIDE0Ci03IDQ5IC05IDc4IC0yIDI5IC02IDU1IC05IDU4IC02IDUgLTEyMCAtMTEwIC0xMjYgLTEyNiAtMiAtNCAxOCAtNDAgNDMgLTc5Cmw0NiAtNzIgLTg2IC0xMzUgYy03NyAtMTIxIC04NiAtMTM5IC03NiAtMTYwIDYgLTEzIDYxIC0xMDEgMTIyIC0xOTYgbDExMgotMTczIDc4IC0yMzkgYzQ0IC0xMzIgNzkgLTI0MiA3OSAtMjQ1IDAgLTMgLTU0IDEwMiAtMTE4IDIzNCAtNjUgMTMyIC0xMzUKMjY3IC0xNTYgMzAwIC00NSA3MSAtMTI0IDE1NCAtMjU3IDI3MSAtMTA2IDkyIC05OCA4OCAtMzU5IDE1OSAtMTkzIDUyIC0xODEKNDcgLTEzNSA2MSAxMzcgNDMgNTUyIDE2NCA1NjEgMTY0IDEwIDAgMzcgNzQgMTQ0IDM5MyAxNiA0NiAzMiA3NSA0OSA4NyAxNAoxMCAxMDAgNzMgMTkwIDEzOSAxMDAgNzMgMTY5IDExNyAxNzUgMTEyIDYgLTUgODUgLTYzIDE3NiAtMTMxeiIvPgo8L2c+Cjwvc3ZnPgo=';
+let showDiagrams=HAS_DIAGRAMS,showTags=HAS_TAGS;
+function toggleTheme(){
+  const h=document.documentElement;const next=(h.getAttribute('data-theme')||'dark')==='dark'?'light':'dark';
+  h.setAttribute('data-theme',next);document.getElementById('theme-btn').innerHTML=next==='dark'?'\u263E':'\u2600';
+  try{localStorage.setItem('terrahawk-theme',next);}catch(e){}
+}
+function init(){
+  try{const t=localStorage.getItem('terrahawk-theme');if(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('theme-btn').innerHTML=t==='light'?'\u2600':'\u263E';}}catch(e){}
+  document.getElementById('meta').textContent='Generated on '+REPORT_DATE;
+  const T=DATA.length,C=DATA.filter(d=>d.status==='clean').length,D=DATA.filter(d=>d.status==='drift').length,E=DATA.filter(d=>d.status==='error').length,TO=DATA.filter(d=>d.status==='timeout').length;
+  const cols=4;
+  document.getElementById('stats').style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  let cards=`<div class="stat-card stat-total"><div class="number">${T}</div><div class="label">Total Units</div></div>
+    <div class="stat-card stat-clean"><div class="number">${C}</div><div class="label">Clean</div></div>
+    <div class="stat-card stat-drift"><div class="number">${D}</div><div class="label">Drifts</div></div>
+    <div class="stat-card stat-error"><div class="number">${E}</div><div class="label">Errors</div></div>`;
+  document.getElementById('stats').innerHTML=cards;
+  if(T>0)document.getElementById('cov-bar').innerHTML=`<div class="seg-clean" style="width:${C/T*100}%"></div><div class="seg-drift" style="width:${D/T*100}%"></div><div class="seg-error" style="width:${E/T*100}%"></div>`;
+  const sf=document.getElementById('sf');
+  sf.innerHTML=`<button class="filter-btn active" data-status="all">All<span class="count">${T}</span></button><button class="filter-btn" data-status="clean">Clean<span class="count">${C}</span></button><button class="filter-btn" data-status="drift">Drifts<span class="count">${D}</span></button><button class="filter-btn" data-status="error">Errors<span class="count">${E}</span></button>${TO?`<button class="filter-btn" data-status="timeout">Timeout<span class="count">${TO}</span></button>`:''}`;
+  sf.querySelectorAll('.filter-btn').forEach(b=>{b.addEventListener('click',()=>{sf.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');render();});});
+  const subs=[...new Set(DATA.map(d=>d.environment+'/'+d.subscription))].sort();
+  const sel=document.getElementById('sub-filter');
+  subs.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o);});
+  sel.addEventListener('change',render);
+  document.getElementById('search').addEventListener('input',render);
+  document.getElementById('sort-select').addEventListener('change',render);
+  // Tag key/value filters
+  if(HAS_TAGS){
+    const tkSel=document.getElementById('tag-key-filter');
+    const tvSel=document.getElementById('tag-val-filter');
+    tkSel.style.display='';tvSel.style.display='';
+    const allKeys=new Set();
+    DATA.forEach(d=>{if(d.tags)Object.keys(d.tags).forEach(k=>allKeys.add(k));});
+    [...allKeys].sort().forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k;tkSel.appendChild(o);});
+    tkSel.addEventListener('change',()=>{
+      const key=tkSel.value;tvSel.innerHTML='<option value="">All values</option>';
+      if(!key){tvSel.disabled=true;render();return;}
+      tvSel.disabled=false;
+      const vals=new Set();DATA.forEach(d=>{if(d.tags&&d.tags[key]!==undefined)vals.add(d.tags[key]);});
+      [...vals].sort().forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;tvSel.appendChild(o);});
+      render();
+    });
+    tvSel.addEventListener('change',render);
+  }
+  // Toggle buttons
+  const tg=document.getElementById('toggle-group');
+  let thtml='';
+  if(HAS_DIAGRAMS)thtml+=`<button class="toggle-btn on" id="tog-diagrams" onclick="toggleView('diagrams')" title="Toggle architecture diagrams">\u{1f5fa}</button>`;
+  if(HAS_TAGS)thtml+=`<button class="toggle-btn on" id="tog-tags" onclick="toggleView('tags')" title="Toggle resource tags">\u{1f3f7}</button>`;
+  tg.innerHTML=thtml;
+  render();
+}
+function toggleView(which){
+  if(which==='diagrams'){showDiagrams=!showDiagrams;document.getElementById('tog-diagrams').classList.toggle('on',showDiagrams);}
+  if(which==='tags'){showTags=!showTags;document.getElementById('tog-tags').classList.toggle('on',showTags);}
+  render();
+}
+
+function exportCSV(){
+  const rows=[['Unit','Status','Resources','Module Source']];
+  const filtered=getFiltered();
+  for(const d of filtered){
+    rows.push([d.unit,d.status,d.resourceCount||'',d.moduleSource||'']);
+  }
+  const csv=rows.map(r=>r.map(c=>typeof c==='string'&&(c.includes(',')||c.includes('"'))?'"'+c.replace(/"/g,'""')+'"':c).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='terrahawk_export.csv';a.click();URL.revokeObjectURL(url);
+}
+function showModulesSummary(){
+  // Collect all module sources with usage stats
+  const modules={};
+  for(const d of DATA){
+    const src=d.moduleSource||'';
+    if(!src)continue;
+    if(!modules[src])modules[src]={source:src,units:[],resourceCount:0,statuses:{clean:0,drift:0,error:0,timeout:0}};
+    modules[src].units.push(d.unit);
+    modules[src].resourceCount+=d.resourceCount||0;
+    modules[src].statuses[d.status]=(modules[src].statuses[d.status]||0)+1;
+  }
+  const all=Object.values(modules).sort((a,b)=>b.units.length-a.units.length);
+  if(!all.length){openInfo('Modules Summary','<p class="no-data">No module sources found in the scan results.</p>',true);return;}
+
+  // Classify: external vs internal
+  function parseModule(src){
+    let name='',version='',url='',isExternal=false;
+    // tfr://registry.terraform.io/Org/Name/provider?version=X.Y.Z
+    const tfr=src.match(/^tfr:\/\/registry\.terraform\.io\/([^?]+)\?version=(.+)$/);
+    if(tfr){
+      name=tfr[1];version=tfr[2];isExternal=true;
+      url='https://registry.terraform.io/modules/'+name+'/'+version;
+      return {name,version,url,isExternal};
+    }
+    // git::https://github.com/Org/Repo.git?ref=vX.Y.Z or //subpath?ref=...
+    const git=src.match(/^git::https:\/\/github\.com\/([^?]+?)(?:\.git)?(?:\?ref=(.+))?$/);
+    if(git){
+      const path=git[1].replace(/\/\//g,'/');
+      name=path;version=git[2]||'';isExternal=true;
+      url='https://github.com/'+path.split('//')[0];
+      if(git[2])url+='/tree/'+git[2];
+      return {name,version,url,isExternal};
+    }
+    // git::ssh://... or git@github.com:...
+    const ssh=src.match(/git@github\.com[:/]([^?]+?)(?:\.git)?(?:\?ref=(.+))?$/);
+    if(ssh){
+      name=ssh[1];version=ssh[2]||'';isExternal=true;
+      url='https://github.com/'+ssh[1].split('//')[0];
+      if(ssh[2])url+='/tree/'+ssh[2];
+      return {name,version,url,isExternal};
+    }
+    // Internal: ${path_relative_from_include()}/... or ${include.root...}/...
+    const internal=src.match(/(?:\/\/|\/)?([^/]+)$/);
+    name=internal?internal[1]:src;
+    // Clean up interpolation prefixes for display
+    const cleanSrc=src.replace(/\$\{[^}]+\}\/?/g,'').replace(/^\.\.?\//,'').replace(/\/\//g,'/');
+    name=cleanSrc||name;
+    return {name,version:'',url:'',isExternal:false};
+  }
+
+  const external=all.filter(m=>parseModule(m.source).isExternal);
+  const internal=all.filter(m=>!parseModule(m.source).isExternal);
+
+  function renderTable(items,title,icon){
+    if(!items.length)return `<h4 style="color:var(--text);margin:20px 0 10px">${icon} ${title} (0)</h4><p class="no-data">None found.</p>`;
+    let h=`<h4 style="color:var(--text);margin:20px 0 10px">${icon} ${title} (${items.length})</h4>`;
+    h+='<table style="table-layout:fixed;width:100%"><colgroup><col style="width:40%"><col style="width:15%"><col style="width:10%"><col style="width:12%"><col style="width:23%"></colgroup><tr><th>Module</th><th>Version</th><th style="text-align:center">Used</th><th style="text-align:center">Resources</th><th>Status</th></tr>';
+    for(const m of items){
+      const p=parseModule(m.source);
+      const nameHtml=p.url?`<a href="${esc(p.url)}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none">${esc(p.name)}</a>`:`<span style="color:var(--text)">${esc(p.name)}</span>`;
+      const ver=p.version?`<span style="color:var(--cyan);font-family:'Roboto Mono',monospace;font-size:12px">${esc(p.version)}</span>`:'<span style="color:var(--text-dim)">-</span>';
+      let statusBadges='';
+      if(m.statuses.clean)statusBadges+=`<span class="badge badge-clean">${m.statuses.clean} clean</span> `;
+      if(m.statuses.drift)statusBadges+=`<span class="badge badge-drift">${m.statuses.drift} drift</span> `;
+      if(m.statuses.error)statusBadges+=`<span class="badge badge-error">${m.statuses.error} error</span> `;
+      if(m.statuses.timeout)statusBadges+=`<span class="badge badge-timeout">${m.statuses.timeout} timeout</span>`;
+      h+=`<tr><td style="font-family:'Roboto Mono',monospace;font-size:12px">${nameHtml}</td><td>${ver}</td><td style="text-align:center;font-weight:600">${m.units.length}</td><td style="text-align:center;color:var(--text-muted)">${m.resourceCount}</td><td>${statusBadges}</td></tr>`;
+    }
+    h+='</table>';
+    return h;
+  }
+
+  const totalModules=all.length;
+  const totalUsage=all.reduce((s,m)=>s+m.units.length,0);
+  const totalRes=all.reduce((s,m)=>s+m.resourceCount,0);
+  let h=`<div style="display:flex;gap:24px;margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);align-items:center">`;
+  h+=`<div><span style="color:var(--text-muted);font-size:12px">Unique Modules</span><br><span style="color:var(--blue);font-size:20px;font-weight:600">${totalModules}</span></div>`;
+  h+=`<div><span style="color:var(--text-muted);font-size:12px">External</span><br><span style="color:var(--cyan);font-size:20px;font-weight:600">${external.length}</span></div>`;
+  h+=`<div><span style="color:var(--text-muted);font-size:12px">Internal</span><br><span style="color:var(--text);font-size:20px;font-weight:600">${internal.length}</span></div>`;
+  h+=`<div><span style="color:var(--text-muted);font-size:12px">Total Usage</span><br><span style="color:var(--text);font-size:20px;font-weight:600">${totalUsage}</span></div>`;
+  h+=`<div><span style="color:var(--text-muted);font-size:12px">Total Resources</span><br><span style="color:var(--text);font-size:20px;font-weight:600">${totalRes}</span></div>`;
+  h+=`<button class="filter-btn" onclick="exportModulesCSV()" title="Export modules as CSV" style="color:var(--cyan);margin-left:auto">&#x2913; CSV</button>`;
+  h+=`</div>`;
+  h+=renderTable(external,'External Modules','\u{1f4e6}');
+  h+=renderTable(internal,'Internal Modules','\u{1f3e0}');
+  // Store parsed data for CSV export
+  window._modulesSummary={all,parseModule};
+  openInfo('Modules Summary',h);
+}
+function exportModulesCSV(){
+  const ms=window._modulesSummary;if(!ms)return;
+  const rows=[['Type','Module','Source','Version','Used','Resources','Clean','Drift','Error','Timeout']];
+  for(const m of ms.all){
+    const p=ms.parseModule(m.source);
+    rows.push([p.isExternal?'External':'Internal',p.name,m.source,p.version,m.units.length,m.resourceCount,m.statuses.clean||0,m.statuses.drift||0,m.statuses.error||0,m.statuses.timeout||0]);
+  }
+  const csv=rows.map(r=>r.map(c=>typeof c==='string'&&(c.includes(',')||c.includes('"'))?'"'+c.replace(/"/g,'""')+'"':c).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='terrahawk_modules.csv';a.click();URL.revokeObjectURL(url);
+}
+function clearFilters(){
+  document.querySelectorAll('#sf .filter-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('#sf .filter-btn[data-status="all"]').classList.add('active');
+  document.getElementById('sub-filter').value='all';
+  document.getElementById('search').value='';
+  document.getElementById('sort-select').value='status';
+  const tk=document.getElementById('tag-key-filter');if(tk){tk.value='';}
+  const tv=document.getElementById('tag-val-filter');if(tv){tv.value='';tv.disabled=true;}
+  render();
+}
+function getFiltered(){
+  const st=document.querySelector('#sf .filter-btn.active')?.dataset.status||'all';
+  const sub=document.getElementById('sub-filter').value;const q=document.getElementById('search').value.toLowerCase();
+  const tagKey=document.getElementById('tag-key-filter')?.value||'';
+  const tagVal=document.getElementById('tag-val-filter')?.value||'';
+  return DATA.filter(d=>{if(st!=='all'&&d.status!==st)return false;if(sub!=='all'&&(d.environment+'/'+d.subscription)!==sub)return false;if(q&&!d.unit.toLowerCase().includes(q))return false;if(tagKey){if(!d.tags||d.tags[tagKey]===undefined)return false;if(tagVal&&d.tags[tagKey]!==tagVal)return false;}return true;});
+}
+function hl(raw){if(!raw)return'';return raw.split('\n').map(line=>{const t=line.trimStart();
+  if(t.startsWith('# ')||t.startsWith('## '))return`<span class="line-header">${esc(line)}</span>`;
+  if(t.match(/^[-+~\/]+\s+resource\s/)){if(t.startsWith('-/+')||t.startsWith('+/-'))return`<span class="line-change">${esc(line)}</span>`;if(t.startsWith('-'))return`<span class="line-del">${esc(line)}</span>`;if(t.startsWith('+'))return`<span class="line-add">${esc(line)}</span>`;if(t.startsWith('~'))return`<span class="line-change">${esc(line)}</span>`;}
+  if(t.startsWith('- ')&&!t.startsWith('- resource'))return`<span class="line-del">${esc(line)}</span>`;
+  if(line.match(/-> null\s*$/))return`<span class="line-del">${esc(line)}</span>`;
+  if(t.startsWith('+ ')&&!t.startsWith('+ resource'))return`<span class="line-add">${esc(line)}</span>`;
+  if(t.startsWith('~ '))return`<span class="line-change">${esc(line)}</span>`;
+  if(line.match(/->/))return`<span class="line-change">${esc(line)}</span>`;
+  if(line.match(/will be |must be |has changed|is tainted|has been/))return`<span class="line-header">${esc(line)}</span>`;
+  if(t.startsWith('Plan:'))return`<span class="line-header">${esc(line)}</span>`;return esc(line);}).join('\n');}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function fp(u,q){const p=u.split('/');let r=`<span class="path-prefix">${esc(p.slice(0,3).join('/')+'/')}</span><span class="app-name">${esc(p.slice(3).join('/'))}</span>`;if(q){const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');r=r.replace(/>([^<]*)</g,(m,t)=>'>'+t.replace(re,'<mark class="hl">$1</mark>')+'<');}return r;}
+function openInfo(title,html,compact){const box=document.querySelector('#info-modal .modal-box');box.classList.toggle('modal-compact',!!compact);document.getElementById('info-title').innerHTML=title;document.getElementById('info-body').innerHTML=html;document.getElementById('info-modal').classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+let PLAN_TYPE_SEL=new Set();
+function showPlanPopup(idx){
+  const u=DATA[idx];if(!u)return;
+  const res=u.planResources||[];
+  if(!res.length){openInfo('Plan Details \u2014 '+u.unit,'<p class="no-data">No plan changes detected.</p>',true);return;}
+  const actLbl={create:'\u2795 Addition',update:'\u270F\uFE0F Modification',delete:'\u2796 Deletion',replace:'\u267B\uFE0F Replacement',read:'\u{1f441} Read'};
+  const actCls={create:'plan-add',update:'plan-upd',delete:'plan-del',replace:'plan-rep',read:'plan-read'};
+  const counts={};const typeCounts={};for(const r of res){counts[r.action]=(counts[r.action]||0)+1;typeCounts[r.type]=(typeCounts[r.type]||0)+1;}
+  const typeList=Object.keys(typeCounts).sort();
+  PLAN_TYPE_SEL=new Set();
+  let summ='';for(const[a,l]of Object.entries(actLbl)){if(counts[a])summ+=`<span class="plan-count ${actCls[a]}">${counts[a]} ${l}</span>`;}
+  let h=`<div class="plan-popup"><p style="margin-bottom:12px">${summ}</p>`;
+  h+=`<div class="plan-filters">
+    <select id="plan-flt-act" onchange="renderPlanTable(${idx})" class="filter-select">
+      <option value="">All actions (${res.length})</option>`;
+  for(const[a,l]of Object.entries(actLbl))if(counts[a])h+=`<option value="${a}">${l} (${counts[a]})</option>`;
+  h+=`</select>
+    <div class="ms-wrap">
+      <button type="button" class="ms-toggle filter-select" id="plan-ms-toggle" onclick="togglePlanTypePanel(event)">All types (${typeList.length})</button>
+      <div class="ms-panel" id="plan-ms-panel">
+        <div class="ms-actions"><a onclick="planTypeSelectAll(${idx},true)">Select all</a> &middot; <a onclick="planTypeSelectAll(${idx},false)">Clear</a></div>
+        <div class="ms-options">`;
+  for(const t of typeList)h+=`<label class="ms-opt"><input type="checkbox" value="${esc(t)}" onchange="togglePlanType(this.value,this.checked,${idx})"><span class="ms-name">${esc(t)}</span><span class="ms-count">${typeCounts[t]}</span></label>`;
+  h+=`</div></div>
+    </div>
+  </div>
+  <div id="plan-table-wrap"></div></div>`;
+  openInfo('Plan Details \u2014 '+u.unit,h,true);
+  renderPlanTable(idx);
+  // Close panel when clicking outside
+  document.addEventListener('click',planMsOutside,true);
+}
+function planMsOutside(e){
+  const p=document.getElementById('plan-ms-panel');const t=document.getElementById('plan-ms-toggle');
+  if(!p||!t)return;
+  if(!p.contains(e.target)&&!t.contains(e.target))p.classList.remove('open');
+}
+function togglePlanTypePanel(e){e.stopPropagation();document.getElementById('plan-ms-panel').classList.toggle('open');}
+function togglePlanType(t,checked,idx){if(checked)PLAN_TYPE_SEL.add(t);else PLAN_TYPE_SEL.delete(t);updatePlanTypeLabel();renderPlanTable(idx);}
+function planTypeSelectAll(idx,select){
+  const cbs=document.querySelectorAll('#plan-ms-panel input[type=checkbox]');
+  PLAN_TYPE_SEL=new Set();
+  cbs.forEach(c=>{c.checked=select;if(select)PLAN_TYPE_SEL.add(c.value);});
+  updatePlanTypeLabel();renderPlanTable(idx);
+}
+function updatePlanTypeLabel(){
+  const t=document.getElementById('plan-ms-toggle');if(!t)return;
+  const total=document.querySelectorAll('#plan-ms-panel input[type=checkbox]').length;
+  if(PLAN_TYPE_SEL.size===0||PLAN_TYPE_SEL.size===total)t.textContent=`All types (${total})`;
+  else if(PLAN_TYPE_SEL.size===1)t.textContent=`${[...PLAN_TYPE_SEL][0]} (1)`;
+  else t.textContent=`${PLAN_TYPE_SEL.size} types selected`;
+}
+function renderPlanTable(idx){
+  const u=DATA[idx];if(!u)return;
+  const res=u.planResources||[];
+  const actCls={create:'plan-add',delete:'plan-del',update:'plan-upd',replace:'plan-rep',read:'plan-read'};
+  const actLbl={create:'\u2795 Add',update:'\u270F\uFE0F Modify',delete:'\u2796 Delete',replace:'\u267B\uFE0F Replace',read:'\u{1f441} Read'};
+  const fAct=document.getElementById('plan-flt-act').value;
+  const filtered=res.filter(r=>(!fAct||r.action===fAct)&&(PLAN_TYPE_SEL.size===0||PLAN_TYPE_SEL.has(r.type)));
+  const actOrd={create:0,replace:1,update:2,delete:3,read:4};
+  filtered.sort((a,b)=>(actOrd[a.action]??9)-(actOrd[b.action]??9)||a.type.localeCompare(b.type)||a.address.localeCompare(b.address));
+  let h='';
+  if(!filtered.length){h='<p class="no-data">No resources match the current filters.</p>';}
+  else{h='<table><tr><th></th><th>Action</th><th>Type</th><th>Resource</th></tr>';
+    for(let i=0;i<filtered.length;i++){
+      const r=filtered[i];
+      const rid=`plan-body-${idx}-${i}`;
+      const hasBody=!!r.body;
+      const caret=hasBody?'<span class="plan-caret">\u25B6</span>':'<span class="plan-caret"></span>';
+      const rowClass=hasBody?'plan-row':'';
+      const onClick=hasBody?` onclick="togglePlanBody('${rid}',this)"`:'';
+      h+=`<tr class="${rowClass}"${onClick}><td style="width:14px">${caret}</td><td><span class="plan-act ${actCls[r.action]||''}">${actLbl[r.action]||r.action}</span></td><td class="plan-type">${esc(r.type)}</td><td class="plan-addr">${esc(r.address)}</td></tr>`;
+      if(hasBody){
+        h+=`<tr class="plan-body-row" id="${rid}"><td colspan="4"><pre class="diff-content" onclick="togglePlanBody('${rid}')">${hl(r.body)}</pre></td></tr>`;
+      }
+    }
+    h+='</table>';}
+  document.getElementById('plan-table-wrap').innerHTML=h;
+}
+function togglePlanBody(id,rowEl){
+  const body=document.getElementById(id);
+  if(!body)return;
+  const open=body.classList.toggle('open');
+  // Also toggle the caret on the triggering header row (if given or sibling)
+  const header=rowEl||body.previousElementSibling;
+  if(header&&header.classList.contains('plan-row'))header.classList.toggle('open',open);
+}
+function showTagPopup(idx){
+  const u=DATA[idx];if(!u)return;const tags=u.tags||{};const keys=Object.keys(tags).sort();
+  let h='';
+  // Resource tags from state
+  h+='<h4 style="color:var(--text);margin-bottom:10px">Resource Tags</h4>';
+  if(!keys.length){h+='<p class="no-data">No resource tags found in state for this unit.</p>';}
+  else{h+='<table><tr><th>Key</th><th>Value</th></tr>';
+    for(const k of keys)h+=`<tr><td class="tag-key">${esc(k)}</td><td class="tag-val">${esc(tags[k])}</td></tr>`;
+    h+='</table>';}
+  openInfo('Tags \u2014 '+u.unit,h,true);
+}
+function showModuleInfo(idx){
+  const u=DATA[idx];if(!u)return;
+  let h='';
+  // Module source & resource count
+  const src=u.moduleSource||'';const rc=u.resourceCount||0;
+  if(src||rc){
+    h+='<div style="display:flex;gap:24px;margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">';
+    if(src){
+      const srcDisplay=src.replace('tfr://','');
+      h+=`<div><span style="color:var(--text-muted);font-size:12px">Module Source</span><br><span style="color:var(--cyan);font-family:'Roboto Mono',monospace;font-size:13px">${esc(srcDisplay)}</span></div>`;
+    }
+    if(rc)h+=`<div><span style="color:var(--text-muted);font-size:12px">Resources in State</span><br><span style="color:var(--text);font-size:20px;font-weight:600">${rc}</span></div>`;
+    h+='</div>';
+  }
+  // Providers
+  const provs=u.providers||[];const tfv=u.tfVersion||'';
+  h+='<h4 style="color:var(--text);margin-bottom:10px">Required Providers</h4>';
+  if(!provs.length&&!tfv){h+='<p class="no-data">No provider requirements specified for this module.</p>';}
+  else{if(tfv)h+=`<p style="color:var(--text-muted);margin-bottom:8px;font-size:13px">Terraform/OpenTofu version: <span style="color:var(--cyan);font-family:'Roboto Mono',monospace">${esc(tfv)}</span></p>`;
+    if(provs.length){h+='<table><tr><th>Provider</th><th>Source</th><th>Version Constraint</th></tr>';
+      for(const p of provs){h+=`<tr><td style="font-weight:500;color:var(--text)">${esc(p.name)}</td><td style="font-family:'Roboto Mono',monospace;font-size:12px;color:var(--text-muted)">${esc(p.source)}</td><td style="font-family:'Roboto Mono',monospace;font-size:12px;color:var(--cyan)">${esc(p.version)}</td></tr>`;}
+      h+='</table>';}
+    else{h+='<p class="no-data">No provider constraints defined.</p>';}}
+  // Inputs
+  const ins=u.inputs||[];
+  h+='<h4 style="color:var(--text);margin-bottom:10px">Inputs ('+ins.length+')</h4>';
+  if(!ins.length){h+='<p class="no-data">No input variables found.</p>';}
+  else{h+='<table><tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>';
+    for(const v of ins){const isReq=!v.default||v.default==='null';
+      h+=`<tr><td class="tag-key">${esc(v.name)}</td><td><pre style="color:var(--cyan);font-family:'Roboto Mono',monospace;font-size:11px;margin:0;white-space:pre-wrap">${esc(v.type||'-')}</pre></td><td style="color:${isReq?'var(--orange)':'var(--text-dim)'};font-family:'Roboto Mono',monospace;font-size:11px">${isReq?'<em>required</em>':esc(v.default)}</td><td style="color:var(--text-muted);font-size:12px">${esc(v.description||'')}</td></tr>`;}
+    h+='</table>';}
+  // Outputs
+  const outs=u.outputs||{};const okeys=Object.keys(outs).sort();
+  h+='<h4 style="color:var(--text);margin:20px 0 10px">Outputs ('+okeys.length+')</h4>';
+  if(!okeys.length){h+='<p class="no-data">No outputs available. The module may not have been applied yet.</p>';}
+  else{h+='<table><tr><th>Name</th><th>Value</th></tr>';
+    for(const k of okeys){const v=outs[k];const vs=typeof v==='object'?JSON.stringify(v,null,2):String(v);
+      h+=`<tr><td class="tag-key">${esc(k)}</td><td style="font-family:'Roboto Mono',monospace;font-size:12px;white-space:pre-wrap;max-width:500px;overflow-wrap:break-word">${esc(vs)}</td></tr>`;}
+    h+='</table>';}
+  openInfo('Module Info \u2014 '+u.unit,h);
+}
+function showAbout(){
+  const tools=[
+    {name:'Terragrunt',desc:'Infrastructure orchestration layer on top of Terraform/OpenTofu',key:'terragrunt',url:'https://github.com/gruntwork-io/terragrunt'},
+    {name:'Terraform',desc:'Infrastructure as Code engine',key:'terraform',url:'https://github.com/hashicorp/terraform'},
+  ];
+  let h='<div class="about-content">';
+  h+=`<p>Terrahawk is a comprehensive Terragrunt infrastructure scanning tool that provides a bird\u2019s eye view of your entire infrastructure state. It automatically discovers all Terragrunt units in your repository, runs <strong>terragrunt plan</strong> across them in parallel, and generates a fully static, self-contained HTML report combining drift detection, architecture diagrams, module introspection, resource tag extraction, and state age tracking.</p>`;
+
+  h+=`<h4>How to Use</h4><p>Terrahawk is designed to run on a <strong>daily schedule via your CI/CD pipeline</strong> (GitHub Actions, GitLab CI, Azure DevOps, Jenkins, etc.). After each run, the generated HTML report can be published to any static-compatible cloud storage \u2014 such as <strong>AWS S3</strong>, <strong>Azure Blob Storage</strong>, or <strong>MinIO</strong> \u2014 and accessed directly from the browser. Since the report is fully static with all data embedded, no backend or server is needed to view it. This enables your team to review infrastructure drift at any time without running any commands.</p>`;
+
+  h+=`<h4>Tools &amp; Versions</h4><table class="ver-table">`;
+  for(const t of tools){
+    const v=VERSIONS[t.key]||'n/a';
+    const cls=v==='disabled'?'tool-dis':'tool-ver';
+    h+=`<tr><td class="tool-name"><a href="${t.url}" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none">${t.name}</a></td><td style="color:var(--text-dim);font-size:12px">${t.desc}</td><td class="${cls}">${v}</td></tr>`;
+  }
+  h+=`</table>`;
+
+  h+=`<h4>Features</h4><p>
+  \u{1f4cb} <strong>Drift Detection</strong> \u2014 Identifies configuration drift by running <code>terragrunt plan -detailed-exitcode</code> on each unit. Diffs are displayed inline with color-coded syntax: green for additions, red for deletions, orange for modifications. Units are classified as clean, drift, error, or timeout.<br><br>
+  \u{1f4f7} <strong>Architecture Diagrams</strong> (<code>--diagrams</code>) \u2014 Interactive Mermaid diagrams built from the Terraform plan and state, showing all resources with dependency arrows. Changed resources are color-coded by action (green=create, orange=update, red=delete, yellow=replace). Diagrams open in a full-screen modal with mouse-wheel zoom, click-and-drag panning, and a fit-to-view button.<br><br>
+  \u{1f3f7} <strong>Tag Extraction</strong> (<code>--tags</code>) \u2014 Resource tags are extracted from Terraform state via <code>terraform show -json</code> and displayed in a key-value popup per unit. The filter bar includes tag key and value dropdowns to filter units by any tag combination.<br><br>
+  \u2139\ufe0f <strong>Module Info</strong> \u2014 Always available. Shows the Terraform module source and version, required providers with version constraints, input variables with full type definitions and defaults, and output values from state. Helps teams understand what each unit deploys without reading code.<br><br>
+  \u{1f4c5} <strong>State Age</strong> \u2014 Queries the remote state backend (Azure Blob Storage) to determine when each unit was last applied. Units are flagged with color-coded badges: green (&lt;30 days), yellow (30\u201390 days), red (90\u2013180 days), and dark red (&gt;180 days). Helps identify stale or forgotten infrastructure.<br><br>
+  \u23f1 <strong>Timeout Protection</strong> (<code>-t N</code>) \u2014 Each unit has a configurable timeout (default: 300 seconds). If a plan exceeds the timeout, it is gracefully terminated and marked as \u201ctimeout\u201d in the report. Per-unit timeout overrides can be set in <code>.terrahawk.yml</code> under <code>unit_timeouts</code> using path-pattern matching, allowing slow modules (e.g., ALZ, Virtual WAN) to have longer timeouts while keeping the default tight.<br><br>
+  \u{1f50d} <strong>Filtering &amp; Search</strong> \u2014 Filter by status, subscription, tags (key + value), and free-text search with highlighting. Toggle buttons show/hide checks, diagrams, and tags. Sort by status, name, or resource count. Export filtered results as CSV.<br><br>
+  \u{1f504} <strong>Incremental Mode</strong> (<code>--incremental</code>) \u2014 Compares each unit\u2019s <code>terragrunt.hcl</code> modification time against the last report. Only changed units are re-scanned; unchanged units are merged from the previous report. Dramatically reduces scan time for large repositories where only a few units change between runs.<br><br>
+  \u{1f517} <strong>Dependency-Aware Execution</strong> (<code>--dag</code>) \u2014 Parses <code>dependency</code> blocks from every <code>terragrunt.hcl</code> file to build a directed acyclic graph (DAG) of unit dependencies. Units are then executed in topological waves: all units with no unresolved dependencies run in parallel within each wave, and the next wave starts only after the previous one completes. This ensures that units depending on others (e.g., a VM unit depending on a networking unit) are planned in the correct order, avoiding init failures caused by missing dependency outputs. Circular dependencies are detected and placed in a final catch-all wave.<br><br>
+  \u{1f3a8} <strong>Dark/Light Theme</strong> \u2014 Toggle between dark and light themes using the moon/sun button in the header. Your preference is saved in localStorage and persists across sessions.
+  </p>`;
+
+  h+=`<h4>Configuration File</h4><p>Terrahawk supports a <code>.terrahawk.yml</code> configuration file in the repository root. This file sets default values for all options, which can be overridden by CLI arguments. This is especially useful for CI/CD pipelines where you want consistent settings without long command lines.</p>`;
+  h+=`<pre style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-size:13px;color:var(--text);overflow-x:auto;margin:12px 0">`;
+  h+=`# .terrahawk.yml \u2014 Terrahawk configuration file\n`;
+  h+=`\n`;
+  h+=`# parallelism: Maximum number of concurrent terragrunt plan\n`;
+  h+=`# executions. Higher values speed up the scan but increase\n`;
+  h+=`# CPU, memory, and API rate limit pressure.\n`;
+  h+=`parallelism: 10\n`;
+  h+=`\n`;
+  h+=`# timeout: Maximum time in seconds for each unit\u2019s plan.\n`;
+  h+=`# Units exceeding this are killed and marked as "timeout".\n`;
+  h+=`timeout: 300\n`;
+  h+=`\n`;
+  h+=`\n`;
+  h+=`\n`;
+  h+=`# diagrams: Enable architecture diagram generation from plan\n`;
+  h+=`# and state data (no external tools required).\n`;
+  h+=`diagrams: true\n`;
+  h+=`\n`;
+  h+=`# tags: Extract resource tags from Terraform state.\n`;
+  h+=`# Enables tag-based filtering in the report.\n`;
+  h+=`tags: true\n`;
+  h+=`\n`;
+  h+=`# incremental: Only re-scan units whose terragrunt.hcl\n`;
+  h+=`# changed since the last report. Merges unchanged units\n`;
+  h+=`# from the previous JSON. Great for daily CI runs.\n`;
+  h+=`incremental: false\n`;
+  h+=`\n`;
+  h+=`# dag: Parse dependency blocks and execute units in\n`;
+  h+=`# topological waves respecting dependency order.\n`;
+  h+=`dag: false\n`;
+  h+=`\n`;
+  h+=`# exclude: Regex pattern to exclude unit paths from the scan.\n`;
+  h+=`# Multiple patterns can be combined with |.\n`;
+  h+=`# Example: "bootstrapping|utl-naming|test"\n`;
+  h+=`exclude: ""\n`;
+  h+=`\n`;
+  h+=`# unit_timeouts: Per-unit timeout overrides (in seconds).\n`;
+  h+=`# Keys are substring patterns matched against unit paths.\n`;
+  h+=`# First match wins. Unmatched units use the global timeout.\n`;
+  h+=`unit_timeouts:\n`;
+  h+=`  ptn-alz: 600\n`;
+  h+=`  virtualwan: 600\n`;
+  h+=`  ptn-applicationgateway: 500\n`;
+  h+=`</pre>`;
+
+  h+=`<h4>Dependency-Aware Execution (DAG) \u2014 In Detail</h4><p>In Terragrunt repositories, units often depend on each other via <code>dependency</code> blocks. For example, a virtual machine unit might depend on a resource group unit and a networking unit. When running plans in parallel without respecting these dependencies, Terraform may fail to initialize because the dependency\u2019s outputs are not yet available in the state.</p>`;
+  h+=`<p>When <code>--dag</code> is enabled, Terrahawk performs the following steps:</p>`;
+  h+=`<p>
+  <strong>1. Parse dependencies</strong> \u2014 For each unit, Terrahawk reads the <code>terragrunt.hcl</code> file and extracts all <code>dependency</code> blocks with their <code>config_path</code> values. These relative paths are resolved to absolute paths and matched against the discovered unit list.<br><br>
+  <strong>2. Build the DAG</strong> \u2014 A directed acyclic graph is constructed where edges represent \u201cunit A depends on unit B\u201d relationships. This graph captures the full dependency tree across all units in the repository.<br><br>
+  <strong>3. Topological sort</strong> \u2014 Kahn\u2019s algorithm is used to produce execution waves. Wave 1 contains all units with zero dependencies (typically naming modules, subscriptions, and resource groups). Wave 2 contains units whose dependencies are all in Wave 1, and so on.<br><br>
+  <strong>4. Wave execution</strong> \u2014 Units within each wave are executed in parallel (respecting the <code>parallelism</code> limit). The next wave only begins after all units in the current wave have completed. This guarantees that every unit\u2019s dependencies have been planned before it runs.<br><br>
+  <strong>5. Circular dependency handling</strong> \u2014 If circular dependencies are detected (which should not happen in a well-structured Terragrunt repo), the affected units are placed in a final catch-all wave and executed anyway, allowing the report to complete with error information rather than hanging.
+  </p>`;
+
+  h+=`<div class="about-footer">Made with &lt;3 by <a href="https://www.wecloud.es/" target="_blank" rel="noopener" title="Cloud made simple" style="color:var(--cyan);text-decoration:none;font-weight:600">WeCloud</a></div>`;
+  h+=`</div>`;
+  const isDark=(document.documentElement.getAttribute('data-theme')||'dark')!=='light';const eagleStyle='height:32px;'+(isDark?'filter:invert(1)':'');openInfo('<div style="display:flex;align-items:center"><img src="'+EAGLE_URI+'" style="'+eagleStyle+'" alt=""><span style="flex:1;text-align:center">About Terrahawk</span></div>',h);
+}
+function render(){
+  const filtered=getFiltered();const groups={};
+  filtered.forEach(d=>{const k=d.environment+'/'+d.subscription;if(!groups[k])groups[k]=[];groups[k].push(d);});
+  let html='';
+  for(const[group,units]of Object.entries(groups).sort()){
+    const gc=units.filter(u=>u.status==='clean').length,gd=units.filter(u=>u.status==='drift').length,ge=units.filter(u=>u.status==='error').length,gto=units.filter(u=>u.status==='timeout').length;
+    let badges='';if(gc)badges+=`<span class="badge badge-clean">${gc} clean</span>`;if(gd)badges+=`<span class="badge badge-drift">${gd} drift</span>`;if(ge)badges+=`<span class="badge badge-error">${ge} error</span>`;if(gto)badges+=`<span class="badge badge-timeout">${gto} timeout</span>`;
+    html+=`<div class="sub-section"><div class="sub-header" onclick="toggleSection(this)"><h2><span class="arrow">\u25BC</span> ${esc(group)}</h2><div class="sub-badges">${badges}</div></div><div class="sub-body">`;
+    const sortBy=document.getElementById('sort-select')?.value||'status';
+    units.sort((a,b)=>{
+      if(sortBy==='name')return a.unit.localeCompare(b.unit);
+      if(sortBy==='resources')return(b.resourceCount||0)-(a.resourceCount||0);
+      const o={drift:0,error:1,timeout:2,clean:3};return(o[a.status]??9)-(o[b.status]??9)||a.unit.localeCompare(b.unit);
+    });
+    units.forEach((u,i)=>{
+      const didx=DATA.indexOf(u);
+      const hasDiff=u.status==='drift'&&u.diff,hasErr=(u.status==='error'||u.status==='timeout')&&u.error;
+      const exp=hasDiff||hasErr;
+      const uid=group.replace(/\//g,'_')+'_'+i;
+      const hasDiag=showDiagrams&&u.planDiagram;
+      const hasTag=showTags&&u.tags&&Object.keys(u.tags).length>0;
+      const hasPlan=u.status==='drift'&&(u.planResources||[]).length>0;
+      html+=`<div class="unit-row status-${u.status} ${exp?'has-diff':''}" ${exp?`onclick="toggleDiff('${uid}')"`:''}>`;
+      const sq=document.getElementById('search').value.toLowerCase();
+      html+=`<div class="unit-status"></div><div class="unit-path">${fp(u.unit,sq)}</div>`;
+      if(u.summary)html+=`<div class="unit-summary">${esc(u.summary)}</div>`;
+      // State age badge
+      if(u.stateAgeDays!=null){const d=u.stateAgeDays;const cls=d>180?'state-180':d>90?'state-90':d>30?'state-30':'state-fresh';html+=`<span class="state-badge ${cls}" title="Last applied ${d} days ago">${d}d</span>`;}
+      html+=`<div class="unit-actions">`;
+      html+=`<span class="act-btn act-info" onclick="event.stopPropagation();showModuleInfo(${didx})" title="Module inputs &amp; outputs"><span class="act-icon">\u2139</span></span>`;
+      if(hasPlan)html+=`<span class="act-btn act-plan" onclick="event.stopPropagation();showPlanPopup(${didx})" title="Plan details"><span class="act-icon">\u{1f4cb}</span> ${(u.planResources||[]).length}</span>`;
+      if(hasDiag)html+=`<span class="act-btn act-diag" onclick="event.stopPropagation();showPlanDiagram(${didx})" title="Architecture diagram"><span class="act-icon">\u{1f5fa}</span></span>`;
+      if(hasTag)html+=`<span class="act-btn act-tag" onclick="event.stopPropagation();showTagPopup(${didx})" title="Tags"><span class="act-icon">\u{1f3f7}</span> ${Object.keys(u.tags).length}</span>`;
+      html+=`</div>`;
+      html+=`<div class="unit-expand"${exp?` id="arrow-${uid}"`:''}>${exp?'\u25B6':''}</div></div>`;
+      if(exp){html+=`<div class="diff-panel" id="diff-${uid}">`;
+        if(hasDiff)html+=`<div class="diff-content">${hl(u.diff)}</div>`;
+        if(hasErr)html+=`<div class="error-content">${esc(u.error)}</div>`;
+        html+=`</div>`;}
+    });html+=`</div></div>`;}
+  document.getElementById('results').innerHTML=html||'<p style="text-align:center;color:var(--text-muted);padding:40px;">No units match filters.</p>';}
+function toggleSection(el){el.classList.toggle('collapsed');el.nextElementSibling.classList.toggle('hidden');}
+function toggleDiff(uid){const p=document.getElementById('diff-'+uid),a=document.getElementById('arrow-'+uid);if(p){p.classList.toggle('open');if(a)a.textContent=p.classList.contains('open')?'\u25BC':'\u25B6';}}
+let diagramCounter=0,dScale=1,dX=0,dY=0,dDragging=false,dStartX=0,dStartY=0;
+const dViewport=()=>document.getElementById('diagram-viewport');
+const dCanvas=()=>document.getElementById('diagram-canvas');
+function dApply(){const c=dCanvas();if(c)c.style.transform=`translate(${dX}px,${dY}px) scale(${dScale})`;document.getElementById('zoom-label').textContent=Math.round(dScale*100)+'%';}
+function diagramZoom(delta){dScale=Math.max(0.1,Math.min(20,dScale+delta));dApply();}
+function diagramFit(){const c=dCanvas(),v=dViewport();if(!c||!v)return;const svg=c.querySelector('svg');if(!svg)return;
+  const vw=v.clientWidth,vh=v.clientHeight;
+  // Get native SVG dimensions from viewBox or bounding box
+  let sw,sh;
+  const vb=svg.getAttribute('viewBox');
+  if(vb){const p=vb.split(/[\s,]+/);sw=parseFloat(p[2]);sh=parseFloat(p[3]);}
+  else{const bb=svg.getBBox();sw=bb.width||svg.scrollWidth;sh=bb.height||svg.scrollHeight;}
+  if(!sw||!sh)return;
+  dScale=Math.min(vw/sw,vh/sh)*0.9;dX=(vw-sw*dScale)/2;dY=(vh-sh*dScale)/2;dApply();}
+function diagramReset(){dScale=1;dX=0;dY=0;dApply();}
+async function showPlanDiagram(idx){
+  const u=DATA[idx];if(!u)return;
+  const mmd=u.planDiagram||'';
+  if(!mmd){openInfo('Plan Diagram \u2014 '+u.unit,'<p class="no-data">No plan diagram available. Run a full scan to generate dependency data.</p>',true);return;}
+  document.getElementById('diagram-title').textContent='Plan Diagram \u2014 '+u.unit;
+  const canvas=dCanvas();
+  const id='mermaid-render-'+(diagramCounter++);
+  try{
+    const{svg}=await mermaid.render(id,themeDiagram(mmd));
+    canvas.innerHTML=svg;
+    const svgEl=canvas.querySelector('svg');
+    if(svgEl){
+      const vb=svgEl.getAttribute('viewBox');
+      if(vb){const p=vb.split(/[\s,]+/);svgEl.setAttribute('width',parseFloat(p[2]));svgEl.setAttribute('height',parseFloat(p[3]));}
+      svgEl.style.maxWidth='none';svgEl.style.overflow='visible';
+    }
+  }catch(e){canvas.innerHTML='<pre style="color:var(--red);padding:20px">'+esc(e.message||String(e))+'</pre>';}
+  dScale=1;dX=0;dY=0;dApply();
+  document.getElementById('diagram-modal').classList.add('open');
+  setTimeout(diagramFit,50);
+}
+// Pan & zoom event handlers
+document.addEventListener('DOMContentLoaded',()=>{
+  const vp=dViewport();if(!vp)return;
+  vp.addEventListener('mousedown',e=>{if(e.button!==0)return;dDragging=true;dStartX=e.clientX-dX;dStartY=e.clientY-dY;vp.classList.add('grabbing');e.preventDefault();});
+  window.addEventListener('mousemove',e=>{if(!dDragging)return;dX=e.clientX-dStartX;dY=e.clientY-dStartY;dApply();});
+  window.addEventListener('mouseup',()=>{dDragging=false;const vp2=dViewport();if(vp2)vp2.classList.remove('grabbing');});
+  vp.addEventListener('wheel',e=>{e.preventDefault();const delta=e.deltaY>0?-0.15:0.15;
+    const rect=vp.getBoundingClientRect();const mx=e.clientX-rect.left;const my=e.clientY-rect.top;
+    const oldScale=dScale;dScale=Math.max(0.1,Math.min(20,dScale+delta));
+    const ratio=dScale/oldScale;dX=mx-(mx-dX)*ratio;dY=my-(my-dY)*ratio;dApply();},{passive:false});
+});
+document.addEventListener('DOMContentLoaded',init);
+</script></body></html>

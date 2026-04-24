@@ -1,0 +1,85 @@
+================================================================================
+THIRD-PARTY LICENSES
+================================================================================
+
+Terrahawk bundles or invokes the following third-party tools. Each tool is the
+property of its respective owners and is subject to its own license terms.
+
+================================================================================
+1. Terraform
+================================================================================
+
+  Project:    https://github.com/hashicorp/terraform
+  License:    Business Source License 1.1 (BUSL-1.1)
+  Copyright:  Copyright (c) 2014-present HashiCorp, Inc. (now IBM Corporation)
+
+  Terraform is licensed under the Business Source License 1.1.
+
+  The BSL 1.1 permits copying, modification, redistribution, non-commercial
+  use, and commercial use, subject to the following condition:
+
+    You may not provide the Licensed Work to third parties as a hosted or
+    embedded service that competes with HashiCorp/IBM's paid version(s) of
+    the Licensed Work.
+
+  The Licensed Work is provided "as is". The Licensor disclaims all warranties,
+  express or implied.
+
+  Each version of Terraform converts to the Mozilla Public License 2.0 (MPL-2.0)
+  four years after its release date.
+
+  Full license text: https://github.com/hashicorp/terraform/blob/main/LICENSE
+
+================================================================================
+2. Terragrunt
+================================================================================
+
+  Project:    https://github.com/gruntwork-io/terragrunt
+  License:    MIT License
+  Copyright:  Copyright (c) 2016 Gruntwork, LLC
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+================================================================================
+3. Mermaid (client-side, loaded via CDN)
+================================================================================
+
+  Project:    https://github.com/mermaid-js/mermaid
+  License:    MIT License
+  Copyright:  Copyright (c) 2014-present Knut Sveidqvist
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+================================================================================
