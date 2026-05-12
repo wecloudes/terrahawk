@@ -108,6 +108,7 @@ terrahawk/
 │   ├── process.py               # Result processing (imports plan_parser)
 │   ├── state_age.py             # Remote state age queries (Azure/AWS/GCS)
 │   ├── report.py                # HTML report generation
+│   ├── tui.py                   # Terminal UI viewer (curses-based)
 │   └── templates/
 │       ├── report.html          # HTML report template
 │       ├── eagle.svg            # Logo (light theme)
@@ -121,7 +122,7 @@ terrahawk/
 
 ```
 cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
-           worker.py, process.py, state_age.py, report.py
+           worker.py, process.py, state_age.py, report.py, tui.py
 worker.py ──→ deps.py (mise_cmd helper)
 process.py ──→ plan_parser.py
 (all other modules: only stdlib)

@@ -53,6 +53,7 @@ A **unit** is any subdirectory of `config_dir` that contains a `terragrunt.hcl` 
 - Skips the root `config_dir` itself (the root `terragrunt.hcl` / `root.hcl` is config, not a unit)
 - Each unit's `rel_path` is relative to `config_dir` (e.g., `landingzones/production/westeurope/app-gateway`)
 - The `--exclude` regex is matched against `rel_path`
+- The `--unit` flag filters to a single unit by exact `rel_path` match or suffix match (e.g., `--unit app-gateway` matches `production/westeurope/app-gateway`)
 
 ### Per-Unit Data Collection
 
@@ -107,6 +108,12 @@ python3 terrahawk.py --version
 # Run as Python module
 python3 -m terrahawk --help
 
+# View results in terminal (latest report)
+python3 terrahawk.py view
+
+# View a specific report
+python3 terrahawk.py view terrahawk_20260511_060000
+
 # Install as editable package
 pip install -e .
 terrahawk --help
@@ -115,7 +122,7 @@ terrahawk --help
 python3 -c "
 import sys; sys.path.insert(0, 'src')
 from terrahawk import cli, config, deps, discovery, incremental
-from terrahawk import worker, plan_parser, process, state_age, report
+from terrahawk import worker, plan_parser, process, state_age, report, tui
 print('All modules import successfully')
 "
 
@@ -155,6 +162,7 @@ terrahawk/
 │   ├── process.py               # process_result orchestrator + sub-processors
 │   ├── state_age.py             # query_blob_dates (Azure/AWS/GCS), extract_root_provider_template
 │   ├── report.py                # get_html_template, generate_report
+│   ├── tui.py                   # Terminal UI viewer (curses-based)
 │   └── templates/
 │       ├── report.html          # Self-contained HTML report template
 │       ├── eagle.svg            # Logo (light theme)
@@ -169,7 +177,7 @@ terrahawk/
 
 ```
 cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
-           worker.py, process.py, state_age.py, report.py
+           worker.py, process.py, state_age.py, report.py, tui.py
 worker.py ──→ deps.py (mise_cmd helper)
 process.py ──→ plan_parser.py
 (all other modules: only stdlib)
@@ -191,6 +199,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 | `process.py` | Transforms raw worker results into report entries. Sub-processors: `_classify_status`, `_process_diagram`, `_process_tags`, `_process_outputs`, `_process_inputs`, `_process_providers`, `_process_module_source`, `_compute_state_age` |
 | `state_age.py` | Queries remote state backends for last-modified dates. Scoped to `remote_state.config` block to avoid matching provider block values. Resolves `${local.X}` interpolations via sibling HCL files |
 | `report.py` | Writes a companion `_data.js` file and generates the HTML report that loads it via `<script src>`. Config flags injected via `%%PLACEHOLDER%%` substitution |
+| `tui.py` | Curses-based terminal viewer for JSON reports. Launched via `terrahawk view [report]`. Modes: list (grouped by env/sub, coverage bar, status/sub/tag/search filters, sort), detail (scrollable diffs with wrap toggle), plan (expandable per-resource diffs with action/type filters), module (tabular providers/inputs/outputs/tags), diagram (in-terminal or browser). Mouse and resize support |
 
 ### Execution Pipeline
 
@@ -202,6 +211,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 5. Setup output dirs and paths
 6. detect_config_dir → find terragrunt root
 7. Discover units (rglob terragrunt.hcl)
+7b. Apply --unit filter (if --unit)
 8. Apply incremental filter (if --incremental)
 9. Query state ages (Azure Blob / AWS S3 / GCS)
 10. Extract root provider template

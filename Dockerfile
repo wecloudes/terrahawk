@@ -34,10 +34,10 @@
 #     terrahawk:gcp --root-dir /workspace
 
 ARG CLOUD=aws
-ARG TERRAFORM_VERSION=1.14.8
+ARG TERRAFORM_VERSION=1.14.9
 ARG TERRAGRUNT_VERSION=1.0.1
-ARG AWSCLI_VERSION=2.22.0
-ARG GCLOUD_VERSION=500.0.0
+ARG AWSCLI_VERSION=2.34.36
+ARG GCLOUD_VERSION=565.0.0
 
 # ============================================================
 # Stage: common binaries (mise, terraform, terragrunt)
@@ -130,11 +130,11 @@ FROM binaries-${CLOUD} AS binaries
 # ============================================================
 # Stage: Python packages — azure-cli on azure variant
 # Built into /install so we can copy it wholesale into the final image.
-# Python version matches the distroless runtime (debian 12 ships Python 3.11),
-# so /install/lib/python3.11/site-packages aligns with what the final stage
+# Python version matches the distroless runtime (debian 12 ships Python 3.13),
+# so /install/lib/python3.13/site-packages aligns with what the final stage
 # looks up at runtime.
 # ============================================================
-FROM python:3.11-slim AS pip-builder
+FROM python:3.13-slim AS pip-builder
 ARG CLOUD
 
 RUN apt-get update && \
@@ -153,10 +153,10 @@ RUN if [ "${CLOUD}" = "azure" ]; then \
 # terrahawk shells out to git (to restore .terraform.lock.hcl files)
 # and to `find`/`rm` for cache cleanup, so the runtime needs a real
 # shell, coreutils, findutils and git on top of the Python runtime.
-# gcloud also ships a bash launcher that execs python, so python:3.11-slim
+# gcloud also ships a bash launcher that execs python, so python:3.13-slim
 # is a natural common base (it matches the pip-builder's interpreter too).
 # ============================================================
-FROM python:3.11-slim AS runtime-base
+FROM python:3.13-slim AS runtime-base
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates git openssh-client && \
     rm -rf /var/lib/apt/lists/* && \

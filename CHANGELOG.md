@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-12
+
 ### Added
 
+- **Terminal viewer** (`terrahawk view [report]`) — full-featured curses-based TUI for browsing scan results in the terminal:
+  - **List view** — units grouped by environment/subscription with colored status badges, coverage bar, resource counts, and state age
+  - **Detail view** — color-coded plan diffs, providers, inputs, outputs, tags, and error output with vertical and horizontal scrolling
+  - **Plan view** — per-resource change list with expand/collapse diffs, action filter (`f`), and resource type filter (`t`)
+  - **Module info view** (`m`) — aligned tables for providers, input variables (name, type, default, description), outputs, and tags (with default/explicit source)
+  - **Architecture diagrams** — in-terminal diagram view (`d`) and browser view (`D`) with zoom controls, fit-to-view, and click-and-drag panning
+  - **Filtering** — status (`f`), subscription (`s`), tag key/value with Tab autocomplete and validation (`t`), free-text search (`/`)
+  - **Sort toggle** (`o`) — cycle between status, name, and resource count
+  - **Text wrapping** (`w`) — toggle word-boundary wrapping for long lines
+  - **Mouse support** — click to select, scroll wheel to navigate
+  - **Graceful error handling** — terminal restored cleanly on errors, "too small" message on tiny terminals, invalid tag filter feedback
+- **Single-unit mode** (`-u, --unit`) — scan only a specific unit by its relative path (exact match or suffix match). Useful for debugging or quick-checking a single unit without running a full scan.
 - **Tool version pinning** — new `terraform_version` and `terragrunt_version` options (in `.terrahawk.yml` or via `--terraform-version` / `--terragrunt-version` CLI flags). When set, commands are executed via [mise](https://mise.jdx.dev) (`mise exec <tool>@<version> --`), allowing teams to lock specific versions without changing their system install. mise is bundled in the Docker images.
 - **External report data** — the HTML report now loads its data from a companion `_data.js` file via `<script src>` instead of embedding all JSON inline. This keeps the HTML lightweight and works from `file://`, S3, Azure Blob, GCS, or any static hosting.
 

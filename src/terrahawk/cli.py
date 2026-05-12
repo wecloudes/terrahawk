@@ -37,6 +37,8 @@ def _parse_args(repo_root):
     parser.add_argument("--tags", action="store_true", default=config.get("tags") == "true")
     parser.add_argument("--incremental", action="store_true", default=config.get("incremental") == "true")
     parser.add_argument("--dag", action="store_true", default=config.get("dag") == "true")
+    parser.add_argument("-u", "--unit", type=str, default=None,
+                        help="Scan only the unit whose relative path matches this value (e.g., 'production/westeurope/app-gw')")
     parser.add_argument("--exclude", type=str, default=config.get("exclude", ""))
     parser.add_argument("--terraform-version", type=str, default=config.get("terraform_version", ""))
     parser.add_argument("--terragrunt-version", type=str, default=config.get("terragrunt_version", ""))
@@ -229,6 +231,13 @@ def _cleanup(tmp_dir, repo_root):
 
 
 def main():
+    # Handle `terrahawk view [report]` subcommand before any other parsing
+    if len(sys.argv) > 1 and sys.argv[1] == "view":
+        from .tui import run_tui
+        report_name = sys.argv[2] if len(sys.argv) > 2 else None
+        run_tui(report_name)
+        return
+
     # Pre-parse --root-dir so config file defaults can be loaded from it
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("-r", "--root-dir", type=str, default=None)
@@ -286,6 +295,15 @@ def main():
 
     if args.exclude:
         print(f"  Exclude pattern: {args.exclude}")
+
+    if args.unit:
+        needle = args.unit.strip("/")
+        units = [(ud, rp) for ud, rp in units if rp == needle or rp.endswith("/" + needle)]
+        if not units:
+            print(f"\n  \u274c No unit found matching '{args.unit}'")
+            print(f"     Run without --unit to list all discovered units.")
+            sys.exit(1)
+        print(f"  Single-unit mode: {units[0][1]}")
 
     # Incremental mode
     units, last_json = _apply_incremental(args, units, output_dir)

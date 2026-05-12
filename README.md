@@ -25,6 +25,16 @@ Designed to run on a daily schedule via CI/CD (GitHub Actions, GitLab CI, Azure 
 - **Dependency-Aware Execution** (`--dag`) — Parses `dependency` blocks to build a DAG and executes units in topological waves, ensuring correct plan order.
 - **Dark/Light Theme** — Toggle in the report header, persisted via localStorage.
 - **CSV Export** — Export filtered results directly from the report.
+- **Terminal Viewer** (`terrahawk view`) — Interactive curses-based TUI to browse scan results directly in the terminal:
+  - Units grouped by environment/subscription with status badges and coverage bar
+  - Filter by status (`f`), subscription (`s`), tag key/value with autocomplete (`t`), or free-text search (`/`)
+  - Sort by status, name, or resource count (`o`)
+  - Detail view with color-coded plan diffs, providers, inputs, outputs, and tags
+  - Plan view with per-resource expand/collapse, action and type filtering
+  - Module info view with aligned tables for providers, inputs, outputs, and tags
+  - Architecture diagrams rendered in-terminal (`d`) or in browser with zoom/pan (`D`)
+  - Text wrapping (`w`) and horizontal scroll (`←→`) for long lines
+  - Mouse support (click to select, scroll wheel to navigate)
 
 ---
 
@@ -54,8 +64,17 @@ python3 terrahawk.py
 # With all optional features:
 python3 terrahawk.py --diagrams --tags --dag
 
+# Scan a single unit:
+python3 terrahawk.py --unit production/westeurope/app-gateway
+
 # Scan a different directory:
 python3 terrahawk.py --root-dir /path/to/repo
+
+# View the latest report in the terminal:
+python3 terrahawk.py view
+
+# View a specific report:
+python3 terrahawk.py view terrahawk_20260511_060000
 
 # As a Python module:
 python3 -m terrahawk --help
@@ -114,7 +133,7 @@ docker run --rm \
 ## CLI Options
 
 ```
-usage: terrahawk [-h] [-r ROOT_DIR] [-p PARALLELISM] [-t TIMEOUT]
+usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
                  [--diagrams] [--tags] [--incremental] [--dag]
                  [--exclude EXCLUDE] [--terraform-version VERSION]
                  [--terragrunt-version VERSION] [--version]
@@ -123,6 +142,7 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-p PARALLELISM] [-t TIMEOUT]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-r, --root-dir` | Current directory | Path to the repository root containing the Terragrunt structure |
+| `-u, --unit` | `None` | Scan only the unit whose relative path matches this value |
 | `-p, --parallelism` | `6` | Maximum concurrent `terragrunt plan` executions |
 | `-t, --timeout` | `300` | Timeout in seconds per unit |
 | `--diagrams` | `false` | Enable architecture diagrams from plan/state |
@@ -133,6 +153,77 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-p PARALLELISM] [-t TIMEOUT]
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
 | `--version` | | Print version and exit |
+
+### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `terrahawk view [report]` | Open the TUI to browse results in the terminal. Loads the latest report by default, or specify a report name/path. |
+
+---
+
+## Terminal Viewer
+
+`terrahawk view` opens an interactive TUI to browse scan results without leaving the terminal.
+
+```bash
+terrahawk view                              # latest report
+terrahawk view terrahawk_20260512_060000     # specific report by name
+terrahawk view /path/to/report.json         # specific report by path
+```
+
+### Views
+
+| Key | View | Description |
+|-----|------|-------------|
+| `Enter` | Detail | Full unit info: status, providers, plan diffs, errors, outputs, tags, inputs |
+| `p` | Plan | Per-resource change list, expandable diffs, filter by action or resource type |
+| `m` | Module | Tabular view of providers, input variables, outputs, and tags |
+| `d` | Diagram | Architecture diagram rendered in the terminal |
+| `D` | Diagram (browser) | Full interactive Mermaid diagram in the browser with zoom/pan |
+
+### Keyboard Shortcuts
+
+**List view:**
+
+| Key | Action |
+|-----|--------|
+| `j/k` or `↑/↓` | Navigate units |
+| `Enter` | Open detail view |
+| `p` | Open plan view |
+| `m` | Open module info |
+| `d` | Open diagram (terminal) |
+| `D` | Open diagram (browser) |
+| `f` | Cycle status filter (all → drift → error → timeout → clean) |
+| `s` | Cycle subscription filter |
+| `t` | Tag filter with autocomplete (key or key=value) |
+| `o` | Cycle sort mode (status → name → resources) |
+| `/` | Free-text search |
+| `c` | Clear all filters |
+| `g/G` | Jump to top/bottom |
+| `q` | Quit |
+
+**Detail / Module / Diagram views:**
+
+| Key | Action |
+|-----|--------|
+| `j/k` or `↑/↓` | Scroll vertically |
+| `l` or `←/→` | Scroll horizontally |
+| `w` | Toggle text wrapping |
+| `0` | Reset horizontal scroll |
+| `p/m/d/D` | Switch to plan/module/diagram view |
+| `Esc/q` | Back to list |
+
+**Plan view:**
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Expand/collapse resource diff |
+| `f` | Cycle action filter (all → create → replace → update → delete → read) |
+| `t` | Cycle resource type filter |
+| `w` | Toggle text wrapping |
+| `←/→` | Horizontal scroll |
+| `Esc/q` | Back to list |
 
 ---
 
@@ -262,6 +353,7 @@ terrahawk/
 │   ├── process.py               # Result processing and assembly
 │   ├── state_age.py             # Remote state age queries (Azure/AWS/GCS)
 │   ├── report.py                # HTML report generation
+│   ├── tui.py                   # Terminal UI viewer (curses-based)
 │   └── templates/
 │       ├── report.html          # HTML report template
 │       ├── eagle.svg            # Logo (light theme)
