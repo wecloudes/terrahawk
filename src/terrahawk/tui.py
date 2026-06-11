@@ -21,7 +21,7 @@ ACTION_LABELS = {
 }
 ACTION_COLORS = {"create": 1, "update": 2, "delete": 3, "replace": 4, "read": 5}
 _ALL_ACTIONS = ("create", "replace", "update", "delete", "read")
-SORT_MODES = ("status", "name", "resources")
+SORT_MODES = ("status", "name", "resources", "duration")
 
 
 def _init_colors():
@@ -46,10 +46,11 @@ def _safe(stdscr, y, x, text, maxlen, attr):
 
 # ── Report loading ────────────────────────────────────────────────
 
-def _find_report(name=None):
-    results_dir = Path.cwd() / "terrahawk_results"
+def _find_report(name=None, root_dir=None):
+    base = Path(root_dir).resolve() if root_dir else Path.cwd()
+    results_dir = base / "terrahawk_results"
     if not results_dir.is_dir():
-        print("\u274c No terrahawk_results/ directory found in current directory.")
+        print(f"\u274c No terrahawk_results/ directory found in {base}.")
         sys.exit(1)
     if name:
         for candidate in [Path(name), results_dir / name]:
@@ -337,6 +338,8 @@ def _apply_filters(all_units, filter_status, filter_sub, filter_tag, search_quer
         units.sort(key=lambda u: u.get("unit", ""))
     elif sort_mode == "resources":
         units.sort(key=lambda u: (-(u.get("resourceCount") or 0), u.get("unit", "")))
+    elif sort_mode == "duration":
+        units.sort(key=lambda u: (-(u.get("duration") or 0), u.get("unit", "")))
     else:  # status
         units.sort(key=lambda u: (
             u.get("environment", "") + "/" + u.get("subscription", ""),
@@ -507,10 +510,14 @@ def _draw_list(stdscr, rows, cursor, scroll, filters, all_units, sort_mode):
             sc = {"clean": "+", "drift": "~", "error": "x", "timeout": "!"}.get(status, "?")
             has_diag = "D" if unit.get("planDiagram") else " "
             has_plan = "P" if unit.get("planResources") else " "
+            # Warning flag: hcl issues / unformatted / out-of-band drift
+            warn = "!" if (unit.get("hclIssues") or unit.get("unformattedFiles")
+                           or unit.get("driftedResources")) else " "
             ntags = len(unit.get("tags") or {})
             tag_ind = f"T{ntags}" if ntags else "  "
+            dur = f"{unit['duration']:.0f}s" if unit.get("duration") is not None else ""
 
-            right = f" {has_plan}{has_diag} {tag_ind:>3s} {res:>5s} {age:>6s}"
+            right = f" {warn}{has_plan}{has_diag} {tag_ind:>3s} {res:>5s} {age:>6s} {dur:>5s}"
             name_w = max(w - len(right) - 6, 10)
             if len(short_path) > name_w:
                 short_path = "..." + short_path[-(name_w - 3):]
@@ -553,6 +560,8 @@ def _format_detail(unit):
         info_parts.append(f"Resources: {unit['resourceCount']}")
     if unit.get("stateAgeDays") is not None:
         info_parts.append(f"State Age: {unit['stateAgeDays']}d")
+    if unit.get("duration") is not None:
+        info_parts.append(f"Duration: {unit['duration']:.0f}s")
     if unit.get("tfVersion"):
         info_parts.append(f"Terraform: {unit['tfVersion']}")
     if info_parts:
@@ -567,6 +576,29 @@ def _format_detail(unit):
             ver = f" {p['version']}" if p.get("version") else ""
             src = f" ({p['source']})" if p.get("source") else ""
             lines.append((7, f"   {p['name']}{ver}{src}"))
+        lines.append((7, ""))
+
+    # HCL hygiene (validation issues + formatting)
+    hcl_issues = unit.get("hclIssues") or []
+    if hcl_issues:
+        lines.append((3, f" ⚠ HCL Validation Issues ({len(hcl_issues)})"))
+        for i in hcl_issues:
+            lines.append((3, f"   {i.get('file', '?')}:{i.get('line', '?')}  {i.get('summary', '')}"))
+        lines.append((7, ""))
+    unfmt = unit.get("unformattedFiles") or []
+    if unfmt:
+        lines.append((2, f" ✎ Needs Formatting ({len(unfmt)})"))
+        for f in unfmt:
+            lines.append((2, f"   {f}"))
+        lines.append((7, ""))
+
+    # Out-of-band drift (resources changed outside Terraform — any status)
+    drifted = unit.get("driftedResources") or []
+    if drifted:
+        lines.append((2, f" ⚠ Changed Outside Terraform ({len(drifted)})"))
+        for r in drifted:
+            acts = ",".join(r.get("actions", []))
+            lines.append((2, f"   {acts:8s}  {r.get('address', '?')}"))
         lines.append((7, ""))
 
     # Drift
@@ -631,7 +663,10 @@ def _format_detail(unit):
             sig = f"   {name}"
             if tp:
                 sig += f"  ({tp})"
-            if dflt:
+            if "value" in inp:
+                val = str(inp["value"])
+                sig += f"  = {val[:60]}"
+            elif dflt:
                 sig += f"  = {dflt}"
             lines.append((5, sig))
             if desc:
@@ -783,16 +818,22 @@ def _format_module_info(unit):
     # ── Inputs table ─────────────────────────────────────────────
     inputs = unit.get("inputs", [])
     if inputs:
+        has_vals = any("value" in i for i in inputs)
         c_name = max(len("Name"), max(len(i.get("name", "")) for i in inputs))
         c_type = max(len("Type"), max(len(i.get("type", "-")) or 1 for i in inputs))
         c_dflt = max(len("Default"), max(len(i.get("default", "-")) or 1 for i in inputs))
         # Cap columns so the table doesn't get absurdly wide
         c_type = min(c_type, 40)
         c_dflt = min(c_dflt, 40)
+        headers = ["Name", "Type", "Default"]
         widths = [c_name, c_type, c_dflt]
+        if has_vals:
+            c_val = min(max(len("Value"), max(len(str(i.get("value", "-"))) for i in inputs)), 40)
+            headers.insert(2, "Value")
+            widths.insert(2, c_val)
 
         lines.append((5, f" Input Variables ({len(inputs)})"))
-        lines.append((5, _table_row(["Name", "Type", "Default"], widths)))
+        lines.append((5, _table_row(headers, widths)))
         lines.append((7, _table_sep(widths)))
         for inp in inputs:
             name = inp.get("name", "?")
@@ -801,7 +842,11 @@ def _format_module_info(unit):
             # Truncate long values in the table
             tp_disp = tp[:c_type] if len(tp) > c_type else tp
             dflt_disp = dflt[:c_dflt] if len(dflt) > c_dflt else dflt
-            lines.append((7, _table_row([name, tp_disp, dflt_disp], widths)))
+            cells = [name, tp_disp, dflt_disp]
+            if has_vals:
+                val = str(inp.get("value", "-"))
+                cells.insert(2, val[:c_val] if len(val) > c_val else val)
+            lines.append((7, _table_row(cells, widths)))
             # Description on the next line if present
             desc = inp.get("description", "")
             if desc:
@@ -1464,8 +1509,8 @@ def _tui_main(stdscr, all_units, report_path):
                 plan_scroll = max(0, plan_scroll)
 
 
-def run_tui(report_name=None):
-    report_path = _find_report(report_name)
+def run_tui(report_name=None, root_dir=None):
+    report_path = _find_report(report_name, root_dir)
     print(f"Loading {report_path.name}...")
     data = _load_report(report_path)
     if not data:

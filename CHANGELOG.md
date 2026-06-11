@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-11
+
+### Added
+
+- **Native Terragrunt 1.x discovery** — units and their dependency graph are now discovered via `terragrunt find --format json --dependencies` (Terragrunt's own HCL parser), catching `dependencies { paths }` blocks, include-based dependencies, and stacks that the previous regex parsing missed. Falls back to the old glob+regex discovery on older Terragrunt versions.
+- **Affected-only scanning** (`--affected [BASE]`) — scan only units affected by git changes since BASE (default `main`) using terragrunt's `--filter=[BASE...HEAD]`. Catches changes in local module sources and read files that the MD5-based `--incremental` mode misses. Unaffected units are merged from the previous report.
+- **Out-of-band drift detection** — the plan JSON (`terraform show -json`) is now captured for every completed plan (exit 0 and 2) and its `resource_drift` array surfaces resources changed outside Terraform — even on units whose plan is otherwise clean. Shown as a `⚠ N ext` badge and expandable panel in the HTML report, and a "Changed Outside Terraform" section in the TUI.
+- **Rendered config collection** — each unit runs `terragrunt render --format json` after its plan, providing: resolved module source, resolved input *values* (shown in a new "Value" column in module info; credential-like input names are masked), and the exact remote state key for state-age matching (replacing path heuristics).
+- **HCL hygiene checks** — every scan runs `terragrunt hcl validate --json` and `terragrunt hcl format --check` once over the tree. Findings are attached per unit (`hcl N` / `fmt` badges in HTML, detail sections in the TUI); root-level findings are printed as console warnings.
+- **`terrahawk graph`** — print the repo-level unit dependency graph as Mermaid, or write a self-contained HTML file with `-o graph.html` (powered by `terragrunt dag graph`).
+- **`terrahawk list`** — instant unit inventory without scanning: dependency counts joined with last-report status, state age, resource count, and duration.
+- **Per-unit scan duration** — recorded for every unit; shown in the console output (`DRIFT (12s)`), as a chip in the HTML report, as a column in the TUI list, and available as a "Slowest" sort in both UIs.
+- **Structured plan fallback** — when text-based plan parsing yields nothing, resource changes are reconstructed from the plan JSON (with sensitive values masked).
+- **Timeout visibility** — timeouts now get their own summary card, coverage-bar segment, and legend entry in the HTML report.
+- **`terrahawk view -r DIR`** — the terminal viewer can now load reports from any repo root, not just the current directory.
+- **Escape key** closes modals in the HTML report.
+
+### Changed
+
+- `terragrunt plan` now runs with `--non-interactive` and `--dependency-fetch-output-from-state` (dependency outputs read directly from remote state — significant speedup on deep dependency graphs), and the redundant `--no-auto-init=false` flag was removed.
+- DAG waves are built from terragrunt-native dependency data when available (regex parsing remains as fallback).
+- State age matching prefers the exact rendered remote-state key over the `rel_path + "/terraform.tfstate"` heuristic.
+
+### Fixed
+
+- Timeout badge used hardcoded dark-theme colors and was unreadable in light theme.
+
 ## [1.1.0] - 2026-05-12
 
 ### Added

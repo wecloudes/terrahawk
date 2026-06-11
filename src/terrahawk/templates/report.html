@@ -4,9 +4,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--text-muted:#8b949e;--text-dim:#484f58;--green:#3fb950;--green-bg:#12261e;--green-border:#1a4028;--red:#f85149;--red-bg:#2d1214;--red-border:#5a1d23;--yellow:#d29922;--yellow-bg:#2a2013;--yellow-border:#4d3a12;--blue:#58a6ff;--blue-bg:#0d2138;--blue-border:#1a3a5c;--cyan:#39d2c0;--orange:#e8863a;--hover:#1c2128;--diff-add-bg:#12261e;--diff-add-text:#3fb950;--diff-del-bg:#2d1214;--diff-del-text:#f85149;--diff-change-bg:#2d1a08;--diff-change-text:#e8863a}
-[data-theme="light"]{--bg:#fff;--surface:#f6f8fa;--border:#d0d7de;--text:#1f2328;--text-muted:#656d76;--text-dim:#8b949e;--green:#1a7f37;--green-bg:#dafbe1;--green-border:#aceebb;--red:#cf222e;--red-bg:#ffebe9;--red-border:#ffcecb;--yellow:#9a6700;--yellow-bg:#fff8c5;--yellow-border:#f5e0a0;--blue:#0969da;--blue-bg:#ddf4ff;--blue-border:#b6e3ff;--cyan:#0a8a7a;--orange:#bc4c00;--hover:#f0f2f5;--diff-add-bg:#dafbe1;--diff-add-text:#1a7f37;--diff-del-bg:#ffebe9;--diff-del-text:#cf222e;--diff-change-bg:#fff8c5;--diff-change-text:#9a6700}
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--text-muted:#8b949e;--text-dim:#484f58;--green:#3fb950;--green-bg:#12261e;--green-border:#1a4028;--red:#f85149;--red-bg:#2d1214;--red-border:#5a1d23;--yellow:#d29922;--yellow-bg:#2a2013;--yellow-border:#4d3a12;--blue:#58a6ff;--blue-bg:#0d2138;--blue-border:#1a3a5c;--cyan:#39d2c0;--orange:#e8863a;--orange-bg:#2d1a08;--orange-border:#5a3410;--hover:#1c2128;--diff-add-bg:#12261e;--diff-add-text:#3fb950;--diff-del-bg:#2d1214;--diff-del-text:#f85149;--diff-change-bg:#2d1a08;--diff-change-text:#e8863a}
+[data-theme="light"]{--bg:#fff;--surface:#f6f8fa;--border:#d0d7de;--text:#1f2328;--text-muted:#656d76;--text-dim:#8b949e;--green:#1a7f37;--green-bg:#dafbe1;--green-border:#aceebb;--red:#cf222e;--red-bg:#ffebe9;--red-border:#ffcecb;--yellow:#9a6700;--yellow-bg:#fff8c5;--yellow-border:#f5e0a0;--blue:#0969da;--blue-bg:#ddf4ff;--blue-border:#b6e3ff;--cyan:#0a8a7a;--orange:#bc4c00;--orange-bg:#fff1e5;--orange-border:#ffd8b5;--hover:#f0f2f5;--diff-add-bg:#dafbe1;--diff-add-text:#1a7f37;--diff-del-bg:#ffebe9;--diff-del-text:#cf222e;--diff-change-bg:#fff8c5;--diff-change-text:#9a6700}
 .state-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap}
+.oob-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow-border);cursor:help}
+.dur-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;color:var(--text-muted);border:1px solid var(--border)}
+.oob-content{padding:10px 16px;background:var(--yellow-bg);border-bottom:1px solid var(--border);font-family:'Roboto Mono',monospace;font-size:12px}
+.oob-title{color:var(--yellow);font-weight:600;margin-bottom:6px}
+.oob-row{color:var(--text);padding:1px 0}
+.oob-act{color:var(--yellow);font-weight:600;margin-right:6px}
 .state-fresh,.state-30,.state-90,.state-180{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border)}
 .header-layout{position:relative;min-height:100px}
 .eagle-icon{height:100px;position:absolute;left:0;top:50%;transform:translateY(-50%);filter:invert(1)}
@@ -27,13 +33,13 @@ body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);line
 .about-footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--border);text-align:center;color:var(--text-muted);font-size:13px}.about-footer strong{color:var(--text)}
 .stats{display:grid;gap:16px;margin-bottom:24px}.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;text-align:center}
 .stat-card .number{font-size:36px;font-weight:700}.stat-card .label{font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
-.stat-total .number{color:var(--blue)}.stat-clean .number{color:var(--green)}.stat-drift .number{color:var(--yellow)}.stat-error .number{color:var(--red)}
+.stat-total .number{color:var(--blue)}.stat-clean .number{color:var(--green)}.stat-drift .number{color:var(--yellow)}.stat-error .number{color:var(--red)}.stat-timeout .number{color:var(--orange)}
 .cov-container{margin-bottom:24px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px}
 .cov-container h3{font-size:14px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
-.cov-bar{height:24px;border-radius:6px;overflow:hidden;display:flex;background:var(--border)}.cov-bar .seg-clean{background:var(--green)}.cov-bar .seg-drift{background:var(--yellow)}.cov-bar .seg-error{background:var(--red)}
+.cov-bar{height:24px;border-radius:6px;overflow:hidden;display:flex;background:var(--border)}.cov-bar .seg-clean{background:var(--green)}.cov-bar .seg-drift{background:var(--yellow)}.cov-bar .seg-error{background:var(--red)}.cov-bar .seg-timeout{background:var(--orange)}
 .cov-legend{display:flex;gap:24px;margin-top:10px;font-size:13px;color:var(--text-muted)}
 .cov-legend span::before{content:'';display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
-.legend-clean::before{background:var(--green)!important}.legend-drift::before{background:var(--yellow)!important}.legend-error::before{background:var(--red)!important}
+.legend-clean::before{background:var(--green)!important}.legend-drift::before{background:var(--yellow)!important}.legend-error::before{background:var(--red)!important}.legend-timeout::before{background:var(--orange)!important}
 .filters{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;align-items:center;position:sticky;top:0;z-index:100;background:var(--bg);padding:12px 0;border-bottom:1px solid var(--border)}
 .filter-group{display:flex;gap:4px}
 .filter-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-muted);padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;transition:all .15s}
@@ -102,7 +108,7 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 .unit-row.status-drift .unit-status::after{content:'\21BB';color:var(--yellow);font-weight:700}
 .unit-row.status-error .unit-status::after{content:'\2717';color:var(--red)}
 .unit-row.status-timeout .unit-status::after{content:'\23F1';color:var(--orange)}
-.badge-timeout{background:#2d1a08;color:var(--orange);border:1px solid #5a3410}
+.badge-timeout{background:var(--orange-bg);color:var(--orange);border:1px solid var(--orange-border)}
 .modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
 .modal-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;position:relative;display:flex;flex-direction:column}
@@ -156,7 +162,7 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 <input type="text" class="search-input" id="search" placeholder="Search units...">
 <select class="filter-select" id="tag-key-filter" style="display:none"><option value="">Tag key...</option></select>
 <select class="filter-select" id="tag-val-filter" style="display:none" disabled><option value="">Tag value...</option></select>
-<select class="filter-select" id="sort-select"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="resources">Sort: Resources</option></select>
+<select class="filter-select" id="sort-select"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="resources">Sort: Resources</option><option value="duration">Sort: Slowest</option></select>
 <button class="filter-btn" onclick="clearFilters()" title="Clear all filters" style="color:var(--red)">&#x2715;</button>
 <div class="filter-group" style="margin-left:auto;display:flex;gap:4px">
 <button class="filter-btn" onclick="exportCSV()" title="Export data as CSV" style="color:var(--cyan)">&#x2913; CSV</button>
@@ -229,14 +235,16 @@ function init(){
   try{const t=localStorage.getItem('terrahawk-theme');if(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('theme-btn').innerHTML=t==='light'?'\u2600':'\u263E';}}catch(e){}
   document.getElementById('meta').textContent='Generated on '+REPORT_DATE;
   const T=DATA.length,C=DATA.filter(d=>d.status==='clean').length,D=DATA.filter(d=>d.status==='drift').length,E=DATA.filter(d=>d.status==='error').length,TO=DATA.filter(d=>d.status==='timeout').length;
-  const cols=4;
+  const cols=TO?5:4;
   document.getElementById('stats').style.gridTemplateColumns=`repeat(${cols},1fr)`;
   let cards=`<div class="stat-card stat-total"><div class="number">${T}</div><div class="label">Total Units</div></div>
     <div class="stat-card stat-clean"><div class="number">${C}</div><div class="label">Clean</div></div>
     <div class="stat-card stat-drift"><div class="number">${D}</div><div class="label">Drifts</div></div>
     <div class="stat-card stat-error"><div class="number">${E}</div><div class="label">Errors</div></div>`;
+  if(TO)cards+=`<div class="stat-card stat-timeout"><div class="number">${TO}</div><div class="label">Timeouts</div></div>`;
   document.getElementById('stats').innerHTML=cards;
-  if(T>0)document.getElementById('cov-bar').innerHTML=`<div class="seg-clean" style="width:${C/T*100}%"></div><div class="seg-drift" style="width:${D/T*100}%"></div><div class="seg-error" style="width:${E/T*100}%"></div>`;
+  if(T>0)document.getElementById('cov-bar').innerHTML=`<div class="seg-clean" style="width:${C/T*100}%"></div><div class="seg-drift" style="width:${D/T*100}%"></div><div class="seg-error" style="width:${E/T*100}%"></div><div class="seg-timeout" style="width:${TO/T*100}%"></div>`;
+  if(TO)document.querySelector('.cov-legend').innerHTML+='<span class="legend-timeout">Timeout</span>';
   const sf=document.getElementById('sf');
   sf.innerHTML=`<button class="filter-btn active" data-status="all">All<span class="count">${T}</span></button><button class="filter-btn" data-status="clean">Clean<span class="count">${C}</span></button><button class="filter-btn" data-status="drift">Drifts<span class="count">${D}</span></button><button class="filter-btn" data-status="error">Errors<span class="count">${E}</span></button>${TO?`<button class="filter-btn" data-status="timeout">Timeout<span class="count">${TO}</span></button>`:''}`;
   sf.querySelectorAll('.filter-btn').forEach(b=>{b.addEventListener('click',()=>{sf.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');render();});});
@@ -419,6 +427,7 @@ function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g
 function fp(u,q){const p=u.split('/');let r=`<span class="path-prefix">${esc(p.slice(0,3).join('/')+'/')}</span><span class="app-name">${esc(p.slice(3).join('/'))}</span>`;if(q){const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');r=r.replace(/>([^<]*)</g,(m,t)=>'>'+t.replace(re,'<mark class="hl">$1</mark>')+'<');}return r;}
 function openInfo(title,html,compact){const box=document.querySelector('#info-modal .modal-box');box.classList.toggle('modal-compact',!!compact);document.getElementById('info-title').innerHTML=title;document.getElementById('info-body').innerHTML=html;document.getElementById('info-modal').classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open'));});
 let PLAN_TYPE_SEL=new Set();
 function showPlanPopup(idx){
   const u=DATA[idx];if(!u)return;
@@ -544,9 +553,10 @@ function showModuleInfo(idx){
   const ins=u.inputs||[];
   h+='<h4 style="color:var(--text);margin-bottom:10px">Inputs ('+ins.length+')</h4>';
   if(!ins.length){h+='<p class="no-data">No input variables found.</p>';}
-  else{h+='<table><tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>';
+  else{const hasVals=ins.some(v=>v.value!==undefined);
+    h+=`<table><tr><th>Name</th><th>Type</th>${hasVals?'<th>Value</th>':''}<th>Default</th><th>Description</th></tr>`;
     for(const v of ins){const isReq=!v.default||v.default==='null';
-      h+=`<tr><td class="tag-key">${esc(v.name)}</td><td><pre style="color:var(--cyan);font-family:'Roboto Mono',monospace;font-size:11px;margin:0;white-space:pre-wrap">${esc(v.type||'-')}</pre></td><td style="color:${isReq?'var(--orange)':'var(--text-dim)'};font-family:'Roboto Mono',monospace;font-size:11px">${isReq?'<em>required</em>':esc(v.default)}</td><td style="color:var(--text-muted);font-size:12px">${esc(v.description||'')}</td></tr>`;}
+      h+=`<tr><td class="tag-key">${esc(v.name)}</td><td><pre style="color:var(--cyan);font-family:'Roboto Mono',monospace;font-size:11px;margin:0;white-space:pre-wrap">${esc(v.type||'-')}</pre></td>${hasVals?`<td style="color:var(--text);font-family:'Roboto Mono',monospace;font-size:11px;word-break:break-all">${v.value!==undefined?esc(v.value):'<em style="color:var(--text-muted)">default</em>'}</td>`:''}<td style="color:${isReq?'var(--orange)':'var(--text-dim)'};font-family:'Roboto Mono',monospace;font-size:11px">${isReq?'<em>required</em>':esc(v.default)}</td><td style="color:var(--text-muted);font-size:12px">${esc(v.description||'')}</td></tr>`;}
     h+='</table>';}
   // Outputs
   const outs=u.outputs||{};const okeys=Object.keys(outs).sort();
@@ -661,12 +671,14 @@ function render(){
     units.sort((a,b)=>{
       if(sortBy==='name')return a.unit.localeCompare(b.unit);
       if(sortBy==='resources')return(b.resourceCount||0)-(a.resourceCount||0);
+      if(sortBy==='duration')return(b.duration||0)-(a.duration||0);
       const o={drift:0,error:1,timeout:2,clean:3};return(o[a.status]??9)-(o[b.status]??9)||a.unit.localeCompare(b.unit);
     });
     units.forEach((u,i)=>{
       const didx=DATA.indexOf(u);
       const hasDiff=u.status==='drift'&&u.diff,hasErr=(u.status==='error'||u.status==='timeout')&&u.error;
-      const exp=hasDiff||hasErr;
+      const hasOob=(u.driftedResources||[]).length>0;
+      const exp=hasDiff||hasErr||hasOob;
       const uid=group.replace(/\//g,'_')+'_'+i;
       const hasDiag=showDiagrams&&u.planDiagram;
       const hasTag=showTags&&u.tags&&Object.keys(u.tags).length>0;
@@ -677,6 +689,15 @@ function render(){
       if(u.summary)html+=`<div class="unit-summary">${esc(u.summary)}</div>`;
       // State age badge
       if(u.stateAgeDays!=null){const d=u.stateAgeDays;const cls=d>180?'state-180':d>90?'state-90':d>30?'state-30':'state-fresh';html+=`<span class="state-badge ${cls}" title="Last applied ${d} days ago">${d}d</span>`;}
+      // Plan duration
+      if(u.duration!=null)html+=`<span class="dur-badge" title="Scan duration">${Math.round(u.duration)}s</span>`;
+      // Out-of-band drift badge (resources changed outside Terraform)
+      const oob=u.driftedResources||[];
+      if(oob.length){const names=oob.slice(0,8).map(r=>`${r.address} (${(r.actions||[]).join(',')})`).join('\n');const more=oob.length>8?`\n…and ${oob.length-8} more`:'';html+=`<span class="oob-badge" title="Changed outside Terraform:\n${esc(names+more)}">⚠ ${oob.length} ext</span>`;}
+      // HCL hygiene badges
+      const hcl=u.hclIssues||[];
+      if(hcl.length){const det=hcl.slice(0,5).map(i=>`${i.file}:${i.line||'?'} ${i.summary}`).join('\n');html+=`<span class="oob-badge" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" title="HCL validation:\n${esc(det)}">hcl ${hcl.length}</span>`;}
+      if((u.unformattedFiles||[]).length)html+=`<span class="oob-badge" title="Needs formatting:\n${esc(u.unformattedFiles.join('\n'))}">fmt</span>`;
       html+=`<div class="unit-actions">`;
       html+=`<span class="act-btn act-info" onclick="event.stopPropagation();showModuleInfo(${didx})" title="Module inputs &amp; outputs"><span class="act-icon">\u2139</span></span>`;
       if(hasPlan)html+=`<span class="act-btn act-plan" onclick="event.stopPropagation();showPlanPopup(${didx})" title="Plan details"><span class="act-icon">\u{1f4cb}</span> ${(u.planResources||[]).length}</span>`;
@@ -685,6 +706,9 @@ function render(){
       html+=`</div>`;
       html+=`<div class="unit-expand"${exp?` id="arrow-${uid}"`:''}>${exp?'\u25B6':''}</div></div>`;
       if(exp){html+=`<div class="diff-panel" id="diff-${uid}">`;
+        if(hasOob){html+=`<div class="oob-content"><div class="oob-title">⚠ Changed outside Terraform (${u.driftedResources.length})</div>`;
+          u.driftedResources.forEach(r=>{html+=`<div class="oob-row"><span class="oob-act">${esc((r.actions||[]).join(','))}</span> ${esc(r.address)}</div>`;});
+          html+=`</div>`;}
         if(hasDiff)html+=`<div class="diff-content">${hl(u.diff)}</div>`;
         if(hasErr)html+=`<div class="error-content">${esc(u.error)}</div>`;
         html+=`</div>`;}

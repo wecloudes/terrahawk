@@ -48,9 +48,11 @@ Terrahawk expects a Terragrunt mono-repo structure. `detect_config_dir()` in `co
 
 A **unit** is any subdirectory of `config_dir` that contains a `terragrunt.hcl` file. Discovery (`discovery.py`) works as follows:
 
-- Recursively globs `config_dir.rglob("terragrunt.hcl")`
+- **Native path (preferred)**: runs `terragrunt find --format json --dependencies` in `config_dir`. Terragrunt's own HCL parser returns units plus exact dependency lists (catches `dependencies { paths }` blocks, include-based deps, and stacks). `discover_units()` returns `(units, deps)` where `deps` maps `unit_dir -> set(dependency_unit_dirs)`.
+- **Fallback path**: when `terragrunt find` fails (older terragrunt, parse error), falls back to `config_dir.rglob("terragrunt.hcl")` and returns `deps=None`; `build_dag()` then re-parses `dependency` blocks with a regex (which misses `dependencies { paths }` blocks).
 - Skips any path containing `.terragrunt-cache`
 - Skips the root `config_dir` itself (the root `terragrunt.hcl` / `root.hcl` is config, not a unit)
+- Unit dirs are `os.path.realpath`-resolved so dependency paths match across symlinks
 - Each unit's `rel_path` is relative to `config_dir` (e.g., `landingzones/production/westeurope/app-gateway`)
 - The `--exclude` regex is matched against `rel_path`
 - The `--unit` flag filters to a single unit by exact `rel_path` match or suffix match (e.g., `--unit app-gateway` matches `production/westeurope/app-gateway`)
@@ -68,6 +70,10 @@ After `terragrunt plan`, the worker (`worker.py`) collects additional data from 
 | Outputs | `terraform output -json` | Outputs table in module info |
 | Module source | `source = "..."` in unit's `terragrunt.hcl` | Module source display |
 | Architecture diagram | Built from `plan_json` + `state_json` (if `--diagrams`) | Mermaid diagram |
+| Plan JSON | `terraform show -json <planfile>` (captured on exit 0 AND 2) | Structured `resource_changes` (fallback when text parse fails) + `resource_drift` |
+| Out-of-band drift | `plan_json.resource_drift` | `driftedResources` entry field → "⚠ N ext" badge (HTML), "Changed Outside Terraform" section (TUI). Surfaces even on clean plans |
+| Unit duration | `time.monotonic()` around plan + collection | `duration` field, console `(Ns)` suffix |
+| Rendered config | `terragrunt render --format json` (per unit, after plan) | Resolved module source, resolved input values (secret-named inputs masked), exact remote_state key for state age. Regex fallbacks remain for old terragrunt |
 
 ### Provider Extraction
 
@@ -114,6 +120,15 @@ python3 terrahawk.py view
 # View a specific report
 python3 terrahawk.py view terrahawk_20260511_060000
 
+# Print repo-level unit dependency graph as Mermaid (or write HTML with -o)
+python3 terrahawk.py graph [-r DIR] [-o graph.html]
+
+# Instant unit inventory + last-report status (no scan)
+python3 terrahawk.py list [-r DIR]
+
+# Scan only units affected by git changes since main (CI-friendly)
+python3 terrahawk.py --affected main
+
 # Install as editable package
 pip install -e .
 terrahawk --help
@@ -150,7 +165,7 @@ terrahawk/
 ├── pyproject.toml               # Package metadata, entry point, version
 ├── Dockerfile                   # Multi-stage, per-cloud variant (aws/azure/gcp)
 ├── src/terrahawk/
-│   ├── __init__.py              # __version__ = "1.0.0", re-export main
+│   ├── __init__.py              # __version__ (keep in sync with pyproject.toml), re-export main
 │   ├── __main__.py              # python -m terrahawk support
 │   ├── cli.py                   # main() split into phase functions + orchestration
 │   ├── config.py                # load_config, load_unit_timeouts, detect_config_dir
@@ -162,6 +177,8 @@ terrahawk/
 │   ├── process.py               # process_result orchestrator + sub-processors
 │   ├── state_age.py             # query_blob_dates (Azure/AWS/GCS), extract_root_provider_template
 │   ├── report.py                # get_html_template, generate_report
+│   ├── graph.py                 # terragrunt dag graph → Mermaid (terrahawk graph)
+│   ├── hygiene.py               # hcl validate + hcl format --check (per-unit annotations)
 │   ├── tui.py                   # Terminal UI viewer (curses-based)
 │   └── templates/
 │       ├── report.html          # Self-contained HTML report template
@@ -179,11 +196,14 @@ terrahawk/
 cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
            worker.py, process.py, state_age.py, report.py, tui.py
 worker.py ──→ deps.py (mise_cmd helper)
+discovery.py ──→ deps.py (mise_cmd helper)
+graph.py ──→ deps.py (mise_cmd helper)
+hygiene.py ──→ deps.py (mise_cmd helper)
 process.py ──→ plan_parser.py
 (all other modules: only stdlib)
 ```
 
-When adding new modules, **never introduce import cycles**. Leaf modules (deps, config, discovery, incremental, plan_parser, state_age, report) must only import from the standard library. `worker.py` may import from `deps.py` for the `mise_cmd` helper.
+When adding new modules, **never introduce import cycles**. Leaf modules (deps, config, incremental, plan_parser, state_age, report) must only import from the standard library. `worker.py` and `discovery.py` may import from `deps.py` for the `mise_cmd` helper.
 
 ### Module Responsibilities
 
@@ -192,7 +212,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 | `cli.py` | Main pipeline: parse args → clean cache → setup → discover → incremental → query state ages → build DAG → execute plans → assemble results → write outputs → cleanup |
 | `config.py` | Loads `.terrahawk.yml` (simple YAML parser, no pyyaml dependency), detects config directory by walking common Terragrunt layouts |
 | `deps.py` | Checks required tools (terraform, terragrunt) and optional tools (az, aws, gcloud), captures versions. Provides `mise_cmd()` helper to wrap commands with `mise exec tool@version --` when version pinning is active |
-| `discovery.py` | Finds all `terragrunt.hcl` units, builds dependency DAG via Kahn's algorithm |
+| `discovery.py` | Finds units via `terragrunt find --json --dependencies` (rglob fallback), builds dependency DAG via Kahn's algorithm |
 | `incremental.py` | MD5-based manifest for incremental scanning |
 | `worker.py` | Runs `terragrunt plan` + terraform show/output per unit |
 | `plan_parser.py` | Extracts structured resource changes from `terraform plan` text output |
@@ -244,6 +264,8 @@ When modifying the template, maintain:
 
 The `state_age.py` module queries three cloud backends. Key implementation details:
 
+**Exact keys from render**: `_compute_state_age()` in `process.py` first tries the exact state key from the unit's rendered config (`render_json.remote_state.config.key`/`prefix`, captured by the worker via `terragrunt render --format json`), falling back to the `rel_path + "/terraform.tfstate"` heuristic. The regex extraction below still powers the one-time blob *listing*.
+
 **Config scoping**: `_extract_remote_state_config()` parses the `remote_state { config = { ... } }` block specifically, so regex only matches backend config values — not provider or generate block values (a common source of bugs).
 
 **Local resolution**: `_resolve_local()` resolves `${local.X}` interpolations by searching the root HCL and sibling `.hcl` files (e.g., `global.hcl`, `customer.hcl`).
@@ -283,6 +305,10 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 **DAG execution**: Kahn's algorithm produces topological waves. Units within a wave run in parallel; waves run sequentially. Circular dependencies are caught and placed in a final wave.
 
 **Incremental scanning**: Each unit's `terragrunt.hcl` is MD5-hashed. Only units whose hash changed since the last manifest are re-scanned. Previous results are merged from the last JSON report.
+
+**Affected scanning** (`--affected [BASE]`): discovery runs `terragrunt find --filter=[BASE...HEAD]` (git-aware), scanning only units whose files — including local module sources and read files — changed since BASE. Unaffected units merge from the previous report like incremental mode. Requires Terragrunt 1.x + git; errors out otherwise (no silent fallback).
+
+**HCL hygiene**: every scan runs `terragrunt hcl validate --json` + `terragrunt hcl format --check` once over the tree (`hygiene.py`). Findings map to units by path prefix → `hclIssues` / `unformattedFiles` entry fields → `hcl N` / `fmt` badges (HTML) and detail sections (TUI). Root-level findings print as console warnings. Silently skipped on pre-1.x terragrunt.
 
 **Error classification**: Exit code 0 = clean, 2 = drift, 124/137 = timeout, anything else = error. Error output is extracted by matching Terraform error block patterns.
 

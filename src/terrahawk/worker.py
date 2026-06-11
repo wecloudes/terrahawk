@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import time
 
 from .deps import mise_cmd
 
@@ -48,6 +49,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         "unit": rel_path,
         "idx": idx,
     }
+    t_start = time.monotonic()
 
     # Determine per-unit timeout
     my_timeout = timeout
@@ -72,7 +74,11 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         "-lock=false", "-no-color",
         f"-out={plan_file}",
         f"--working-dir={unit_dir}",
-        "--no-auto-init=false",
+        "--non-interactive",
+        # Read dependency outputs directly from remote state instead of
+        # spawning `terraform output` in each dependency — big speedup on
+        # deep DAGs, and safe for a read-only scanner.
+        "--dependency-fetch-output-from-state",
     ])
 
     retryable_errors = ["Failed to query available provider packages",
@@ -114,15 +120,37 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     result["exit_code"] = exit_code
     result["plan_output"] = plan_output
 
+    # Rendered config (terragrunt 1.x): fully resolved inputs, module source,
+    # and remote_state config (no ${local.X} left). Powers exact state-age
+    # keys, real input values, and module source without regex parsing.
+    try:
+        r = subprocess.run(
+            mise_cmd("terragrunt", tg_ver, [
+                "render", "--format", "json",
+                f"--working-dir={unit_dir}",
+                "--non-interactive",
+                "--dependency-fetch-output-from-state",
+            ]),
+            capture_output=True, text=True, timeout=60, env=plan_env,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            result["render_json"] = json.loads(r.stdout)
+    except Exception:
+        pass  # old terragrunt or render bug — consumers fall back to regex
+
     # Find cache dir for optional tools
     cache_dir = find_cache_dir(unit_dir)
     result["cache_dir"] = cache_dir
 
     if not cache_dir:
+        result["duration"] = round(time.monotonic() - t_start, 1)
         return result
 
-    # Plan JSON (for dependency-aware plan diagrams)
-    if exit_code == 2 and os.path.exists(plan_file):
+    # Plan JSON (structured resource changes, out-of-band drift, diagrams).
+    # Captured for ANY completed plan: a clean plan (exit 0) can still carry
+    # resource_drift entries — changes made outside Terraform with no pending
+    # actions — which the text output never surfaces.
+    if exit_code in (0, 2) and os.path.exists(plan_file):
         try:
             r = subprocess.run(
                 mise_cmd("terraform", tf_ver, [f"-chdir={cache_dir}", "show", "-json", plan_file]),
@@ -181,4 +209,5 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     if os.path.exists(tg_path):
         result["tg_hcl"] = open(tg_path).read()
 
+    result["duration"] = round(time.monotonic() - t_start, 1)
     return result

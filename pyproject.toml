@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "terrahawk"
-version = "1.1.0"
+version = "1.2.0"
 description = "Bird's eye view of your infra — Terragrunt infrastructure scanner"
 requires-python = ">=3.9"
 

@@ -1,5 +1,6 @@
 """Result processing: transform raw worker results into final report entries."""
 
+import json
 import re
 from datetime import datetime, timezone
 
@@ -92,8 +93,47 @@ def _process_outputs(raw):
     return outputs
 
 
+_SECRET_INPUT_RE = re.compile(
+    r"password|passwd|secret|token|api_key|apikey|private_key|ssh_key|"
+    r"credential|connection_string|sas_|client_secret|access_key",
+    re.IGNORECASE,
+)
+
+
+def _rendered_input_value(name, value):
+    """Format a rendered input value for display, masking likely secrets.
+
+    The HTML report is published to static storage — never emit values whose
+    input name looks credential-like.
+    """
+    if _SECRET_INPUT_RE.search(name):
+        return "(masked)"
+    try:
+        s = value if isinstance(value, str) else json.dumps(value, default=str)
+    except Exception:
+        s = str(value)
+    return s if len(s) <= 200 else s[:200] + "…"
+
+
 def _process_inputs(raw):
-    """Parse input variables from variables.tf."""
+    """Parse input variables from variables.tf, enriched with rendered values."""
+    inputs = _parse_variables_tf(raw)
+
+    rendered = (raw.get("render_json") or {}).get("inputs") or {}
+    if rendered:
+        declared = {i["name"] for i in inputs}
+        for i in inputs:
+            if i["name"] in rendered:
+                i["value"] = _rendered_input_value(i["name"], rendered[i["name"]])
+        # Inputs passed by terragrunt but not declared in variables.tf
+        for name in sorted(set(rendered) - declared):
+            inputs.append({"name": name,
+                           "value": _rendered_input_value(name, rendered[name])})
+    return inputs
+
+
+def _parse_variables_tf(raw):
+    """Parse input variable declarations from variables.tf."""
     inputs = []
     vf = raw.get("variables_tf", "")
     if not vf:
@@ -409,7 +449,10 @@ def _generate_plan_diagram(raw, plan_resources):
 
 
 def _process_module_source(raw):
-    """Extract module source from terragrunt.hcl."""
+    """Extract module source: rendered config first, terragrunt.hcl regex fallback."""
+    src = ((raw.get("render_json") or {}).get("terraform") or {}).get("source")
+    if src:
+        return src
     tg = raw.get("tg_hcl", "")
     if tg:
         sm = re.search(r'source\s*=\s*"([^"]+)"', tg)
@@ -418,10 +461,20 @@ def _process_module_source(raw):
     return ""
 
 
-def _compute_state_age(rel_path, blob_dates):
-    """Compute state age in days from blob dates."""
-    blob_key = rel_path + "/terraform.tfstate"
-    lm = blob_dates.get(blob_key)
+def _compute_state_age(rel_path, blob_dates, raw=None):
+    """Compute state age in days from blob dates.
+
+    Prefers the exact state key from the rendered remote_state config
+    (no path heuristics); falls back to rel_path + '/terraform.tfstate'.
+    """
+    lm = None
+    cfg = ((raw or {}).get("render_json") or {}).get("remote_state") or {}
+    exact_key = (cfg.get("config") or {}).get("key") or (cfg.get("config") or {}).get("prefix")
+    if exact_key:
+        lm = blob_dates.get(exact_key)
+    if not lm:
+        blob_key = rel_path + "/terraform.tfstate"
+        lm = blob_dates.get(blob_key)
     if not lm:
         return None
     try:
@@ -448,10 +501,18 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
 
     status, diff, summary, error = _classify_status(exit_code, plan_output)
 
-    # Parse plan resources (for drift units, populate structured change list)
+    # Parse plan resources (for drift units, populate structured change list).
+    # Text parse first (best diff bodies); JSON plan as fallback when the
+    # text parser comes up empty.
     plan_resources = []
     if status == "drift":
         plan_resources = plan_parser.parse_plan_resources(plan_output)
+        if not plan_resources and raw.get("plan_json"):
+            plan_resources = plan_parser.parse_plan_resources_json(raw["plan_json"])
+
+    # Out-of-band drift: resources changed outside Terraform. Present even on
+    # clean plans (exit 0), where the text output never mentions them.
+    drifted_resources = plan_parser.extract_resource_drift(raw.get("plan_json"))
 
     plan_diagram = _generate_plan_diagram(raw, plan_resources)
     tags, default_tags = _process_tags(raw, args)
@@ -460,7 +521,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
     providers, tf_version = _process_providers(raw, root_provider_tpl)
     module_source = _process_module_source(raw)
     resource_count = raw.get("resource_count", 0)
-    state_age_days = _compute_state_age(rel_path, blob_dates)
+    state_age_days = _compute_state_age(rel_path, blob_dates, raw)
 
     return {
         "unit": rel_path, "status": status, "exit_code": exit_code,
@@ -474,4 +535,6 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
         "providers": providers, "tfVersion": tf_version,
         "moduleSource": module_source, "resourceCount": resource_count,
         "stateAgeDays": state_age_days,
+        "duration": raw.get("duration"),
+        "driftedResources": drifted_resources,
     }

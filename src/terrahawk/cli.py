@@ -19,6 +19,8 @@ from .worker import run_plan
 from .process import process_result
 from .state_age import query_blob_dates, extract_root_provider_template
 from .report import generate_report
+from .graph import cmd_graph
+from .hygiene import check_hygiene, attach_hygiene
 
 
 def _parse_args(repo_root):
@@ -36,6 +38,10 @@ def _parse_args(repo_root):
     parser.add_argument("--diagrams", action="store_true", default=config.get("diagrams") == "true")
     parser.add_argument("--tags", action="store_true", default=config.get("tags") == "true")
     parser.add_argument("--incremental", action="store_true", default=config.get("incremental") == "true")
+    parser.add_argument("--affected", nargs="?", const="main", default=config.get("affected") or None,
+                        metavar="BASE",
+                        help="Scan only units affected by git changes since BASE (default: main). "
+                             "Uses terragrunt's --filter=[BASE...HEAD]; unaffected units are merged from the previous report")
     parser.add_argument("--dag", action="store_true", default=config.get("dag") == "true")
     parser.add_argument("-u", "--unit", type=str, default=None,
                         help="Scan only the unit whose relative path matches this value (e.g., 'production/westeurope/app-gw')")
@@ -70,23 +76,31 @@ def _setup(repo_root, timestamp):
 
 
 def _apply_incremental(args, units, output_dir):
-    """Filter units for incremental mode. Returns (filtered_units, last_json)."""
+    """Filter units for incremental/affected mode. Returns (filtered_units, last_json)."""
     last_json = None
-    if not args.incremental:
+    if not (args.incremental or args.affected):
         return units, last_json
 
     prev_jsons = sorted(output_dir.glob("terrahawk_*.json"), key=os.path.getmtime, reverse=True)
     if prev_jsons:
         last_json = prev_jsons[0]
-        prev_manifest_path = str(last_json).replace(".json", ".manifest")
-        prev_manifest = load_manifest(prev_manifest_path)
-        original_count = len(units)
-        units = [(ud, rp) for ud, rp in units if hash_file(os.path.join(ud, "terragrunt.hcl")) != prev_manifest.get(rp, "")]
-        skipped = original_count - len(units)
-        print(f"  Incremental: {len(units)} changed, {skipped} reused from {last_json.name}")
+        if args.incremental:
+            prev_manifest_path = str(last_json).replace(".json", ".manifest")
+            prev_manifest = load_manifest(prev_manifest_path)
+            original_count = len(units)
+            units = [(ud, rp) for ud, rp in units if hash_file(os.path.join(ud, "terragrunt.hcl")) != prev_manifest.get(rp, "")]
+            skipped = original_count - len(units)
+            print(f"  Incremental: {len(units)} changed, {skipped} reused from {last_json.name}")
+        else:
+            # --affected: units already filtered at discovery; previous report
+            # only needed for merging the unaffected ones back in.
+            print(f"  Affected: {len(units)} units to scan, rest merged from {last_json.name}")
     else:
-        print("  \u26a0\ufe0f  No previous report found, running full scan.")
-        args.incremental = False
+        if args.incremental:
+            print("  \u26a0\ufe0f  No previous report found, running full scan.")
+            args.incremental = False
+        else:
+            print("  \u26a0\ufe0f  No previous report found \u2014 report will only contain affected units.")
 
     return units, last_json
 
@@ -115,7 +129,9 @@ def _execute_plans(units, waves, args, unit_timeouts, repo_root, tmp_dir):
                     ec = result.get("exit_code", 1)
                     icon = {0: "\u2705", 2: "\U0001f504", 124: "\u23f1\ufe0f"}.get(ec, "\u274c")
                     label = {0: "No drift", 2: "DRIFT", 124: "TIMEOUT"}.get(ec, "ERROR")
-                    print(f"  {icon} {rp:65s} {label}")
+                    dur = result.get("duration")
+                    dur_str = f" ({dur:.0f}s)" if dur is not None else ""
+                    print(f"  {icon} {rp:65s} {label}{dur_str}")
                 except Exception as e:
                     print(f"  \u274c {rp:65s} EXCEPTION: {e}")
 
@@ -147,8 +163,8 @@ def _assemble_results(raw_results, args, blob_dates, root_provider_tpl, last_jso
         for r in raw_results
     ]
 
-    # Incremental merge
-    if args.incremental and last_json and last_json.exists():
+    # Incremental/affected merge
+    if (args.incremental or args.affected) and last_json and last_json.exists():
         try:
             prev_results = json.load(open(last_json))
             scanned_units = {r["unit"] for r in results}
@@ -230,13 +246,97 @@ def _cleanup(tmp_dir, repo_root):
         pass
 
 
+def _resolve_subcmd_root(root_dir):
+    """Resolve repo root + config dir for the scan-less subcommands."""
+    repo_root = Path(root_dir).resolve() if root_dir else Path.cwd().resolve()
+    if not repo_root.is_dir():
+        print(f"❌ Root directory does not exist: {repo_root}")
+        sys.exit(1)
+    return repo_root, detect_config_dir(repo_root)
+
+
+def _run_graph(argv):
+    """`terrahawk graph [-r DIR] [-o FILE.html]`."""
+    p = argparse.ArgumentParser(prog="terrahawk graph",
+                                description="Print the unit dependency graph as Mermaid (or write HTML)")
+    p.add_argument("-r", "--root-dir", type=str, default=None)
+    p.add_argument("-o", "--output", type=str, default=None,
+                   help="Write a self-contained HTML file instead of printing Mermaid")
+    p.add_argument("--terragrunt-version", type=str, default="")
+    a = p.parse_args(argv)
+    _, config_dir = _resolve_subcmd_root(a.root_dir)
+    return cmd_graph(config_dir, a.terragrunt_version, a.output)
+
+
+def _run_list(argv):
+    """`terrahawk list [-r DIR]` — unit inventory + last report status, no scan."""
+    p = argparse.ArgumentParser(prog="terrahawk list",
+                                description="List discovered units with last-report status (no scan)")
+    p.add_argument("-r", "--root-dir", type=str, default=None)
+    p.add_argument("--terragrunt-version", type=str, default="")
+    a = p.parse_args(argv)
+    repo_root, config_dir = _resolve_subcmd_root(a.root_dir)
+
+    units, deps = discover_units(config_dir, tg_ver=a.terragrunt_version)
+    if not units:
+        print("No units found.")
+        return 1
+
+    # Last report (if any) for status/age/resources
+    last = {}
+    last_name = ""
+    output_dir = repo_root / "terrahawk_results"
+    if output_dir.exists():
+        prev = sorted(output_dir.glob("terrahawk_*.json"), key=os.path.getmtime, reverse=True)
+        if prev:
+            try:
+                last = {e["unit"]: e for e in json.load(open(prev[0]))}
+                last_name = prev[0].name
+            except Exception:
+                pass
+
+    dep_counts = {}
+    if deps:
+        dir_to_rel = {ud: rp for ud, rp in units}
+        for ud, rp in units:
+            dep_counts[rp] = len([d for d in deps.get(ud, ()) if d in dir_to_rel])
+
+    icons = {"clean": "✅", "drift": "\U0001f504", "error": "❌", "timeout": "⏱️"}
+    w = max(len(rp) for _, rp in units)
+    hdr = f"  {'UNIT':<{w}}  {'DEPS':>4}  {'STATUS':<9} {'AGE':>5}  {'RES':>4}  {'DUR':>6}"
+    print(f"\U0001f4cb {len(units)} units" + (f"  (last report: {last_name})" if last_name else "  (no previous report)"))
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+    for _, rp in units:
+        e = last.get(rp, {})
+        st = e.get("status", "-")
+        icon = icons.get(st, " ")
+        age = f"{e['stateAgeDays']}d" if e.get("stateAgeDays") is not None else "-"
+        res = e.get("resourceCount") or "-"
+        dur = f"{e['duration']:.0f}s" if e.get("duration") is not None else "-"
+        print(f"  {rp:<{w}}  {dep_counts.get(rp, 0):>4}  {icon} {st:<7} {age:>5}  {res:>4}  {dur:>6}")
+    return 0
+
+
 def main():
-    # Handle `terrahawk view [report]` subcommand before any other parsing
+    # Handle `terrahawk view [report] [-r DIR]` subcommand before any other parsing
     if len(sys.argv) > 1 and sys.argv[1] == "view":
         from .tui import run_tui
-        report_name = sys.argv[2] if len(sys.argv) > 2 else None
-        run_tui(report_name)
+        vp = argparse.ArgumentParser(prog="terrahawk view",
+                                     description="Browse a scan report in the terminal")
+        vp.add_argument("report", nargs="?", default=None)
+        vp.add_argument("-r", "--root-dir", type=str, default=None)
+        va = vp.parse_args(sys.argv[2:])
+        run_tui(va.report, va.root_dir)
         return
+
+    # `terrahawk graph` — repo-level unit dependency graph (no scan)
+    if len(sys.argv) > 1 and sys.argv[1] == "graph":
+        sys.exit(_run_graph(sys.argv[2:]))
+
+    # `terrahawk list` — instant unit inventory (no scan)
+    if len(sys.argv) > 1 and sys.argv[1] == "list":
+        sys.exit(_run_list(sys.argv[2:]))
 
     # Pre-parse --root-dir so config file defaults can be loaded from it
     pre_parser = argparse.ArgumentParser(add_help=False)
@@ -289,9 +389,17 @@ def main():
 
     # Discover units
     print("\U0001f4cb Discovering units...")
-    units = discover_units(config_dir, args.exclude)
+    filter_expr = f"[{args.affected}...HEAD]" if args.affected else None
+    try:
+        units, native_deps = discover_units(config_dir, args.exclude, args.terragrunt_version, filter_expr)
+    except RuntimeError as e:
+        print(f"  ❌ {e}")
+        sys.exit(1)
     total_discovered = len(units)
-    print(f"  Found {total_discovered} units")
+    engine = "terragrunt find" if native_deps is not None else "glob fallback"
+    print(f"  Found {total_discovered} units (via {engine})")
+    if args.affected:
+        print(f"  Affected mode: units changed since '{args.affected}'")
 
     if args.exclude:
         print(f"  Exclude pattern: {args.exclude}")
@@ -309,6 +417,16 @@ def main():
     units, last_json = _apply_incremental(args, units, output_dir)
     total_to_scan = len(units)
 
+    # HCL hygiene (terragrunt 1.x: hcl validate + hcl format --check)
+    print("\U0001f9fc Checking HCL hygiene...")
+    hygiene = check_hygiene(config_dir, args.terragrunt_version)
+    if hygiene is None:
+        print("  Skipped (requires Terragrunt 1.x)")
+    else:
+        n_diag = sum(len(v) for v in hygiene["diagnostics"].values())
+        n_fmt = len(hygiene["unformatted"])
+        print(f"  {n_diag} validation issue(s), {n_fmt} unformatted file(s)")
+
     # Query state ages
     print("\U0001f4c5 Querying state file ages...")
     blob_dates = query_blob_dates(config_dir)
@@ -320,7 +438,7 @@ def main():
     waves = None
     if args.dag and units:
         print("\U0001f517 Building dependency DAG...")
-        waves = build_dag(units)
+        waves = build_dag(units, native_deps)
         print(f"  {len(waves)} execution waves from {len(units)} units")
 
     # Run plans
@@ -328,6 +446,14 @@ def main():
 
     # Process results
     results = _assemble_results(raw_results, args, blob_dates, root_provider_tpl, last_json)
+
+    # Annotate entries with hygiene findings; report root-level leftovers
+    leftovers = attach_hygiene(results, hygiene)
+    if leftovers:
+        for d in leftovers["diagnostics"]:
+            print(f"  ⚠️  HCL {d['severity']}: {d['file']}:{d.get('line', '?')} {d['summary']}")
+        for f in leftovers["unformatted"]:
+            print(f"  ⚠️  Needs formatting: {f}")
 
     # Write outputs
     _write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args)
