@@ -89,10 +89,23 @@ terrahawk --help
 
 ### Run with Docker
 
-The Dockerfile produces cloud-specific images — each variant ships only the CLI needed for its remote state backend.
+Cloud-specific images — each variant ships only the CLI needed for its remote state backend.
+
+Prebuilt multi-arch images (linux/amd64 + linux/arm64) are published to [Docker Hub](https://hub.docker.com/r/wecloudes/terrahawk):
 
 ```bash
-# Build (pick your cloud backend):
+# Pull (pick your cloud backend):
+docker pull wecloudes/terrahawk:aws     # moving tag — latest release
+docker pull wecloudes/terrahawk:azure
+docker pull wecloudes/terrahawk:gcp
+
+# Or pin a release:
+docker pull wecloudes/terrahawk:aws-1.2.0
+```
+
+Or build locally:
+
+```bash
 docker build --build-arg CLOUD=aws   -t terrahawk:aws   .
 docker build --build-arg CLOUD=azure -t terrahawk:azure .
 docker build --build-arg CLOUD=gcp   -t terrahawk:gcp   .
