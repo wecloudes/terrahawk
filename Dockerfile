@@ -34,8 +34,8 @@
 #     terrahawk:gcp --root-dir /workspace
 
 ARG CLOUD=aws
-ARG TERRAFORM_VERSION=1.14.9
-ARG TERRAGRUNT_VERSION=1.0.1
+ARG TERRAFORM_VERSION=1.15.2
+ARG TERRAGRUNT_VERSION=1.0.8
 ARG AWSCLI_VERSION=2.34.36
 ARG GCLOUD_VERSION=565.0.0
 
@@ -161,7 +161,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates git openssh-client && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd -g 65532 nonroot && \
-    useradd  -u 65532 -g 65532 -d /home/nonroot -s /usr/sbin/nologin -m nonroot
+    useradd  -u 65532 -g 65532 -d /home/nonroot -s /usr/sbin/nologin -m nonroot && \
+    # Terraform plugin cache (TF_PLUGIN_CACHE_DIR points here in the final stage)
+    mkdir -p /cache/plugins && chown -R 65532:65532 /cache
 
 # ============================================================
 # Final stage — AWS variant
@@ -171,8 +173,11 @@ COPY --from=binaries /tools/mise             /usr/local/bin/mise
 COPY --from=binaries /tools/terraform        /usr/local/bin/terraform
 COPY --from=binaries /tools/terragrunt       /usr/local/bin/terragrunt
 COPY --from=binaries /usr/local/awscli        /usr/local/awscli
-COPY --from=binaries /usr/local/bin/aws      /usr/local/bin/aws
-COPY --from=binaries /usr/local/bin/aws_completer /usr/local/bin/aws_completer
+# Recreate the launcher symlinks — COPYing /usr/local/bin/aws dereferences the
+# symlink into a standalone file, and the PyInstaller launcher then fails to
+# find its bundled libpython relative to /usr/local/bin.
+RUN ln -s /usr/local/awscli/v2/current/bin/aws           /usr/local/bin/aws && \
+    ln -s /usr/local/awscli/v2/current/bin/aws_completer /usr/local/bin/aws_completer
 COPY --from=pip-builder /install/lib         /usr/local/lib
 COPY --from=pip-builder /install/bin         /usr/local/bin
 USER nonroot
