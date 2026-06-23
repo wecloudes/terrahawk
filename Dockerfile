@@ -34,10 +34,16 @@
 #     terrahawk:gcp --root-dir /workspace
 
 ARG CLOUD=aws
-ARG TERRAFORM_VERSION=1.15.2
+# Pinned tool versions — bump in lockstep and re-run a `docker scout` scan
+# (scripts/build-push.sh) before publishing. Most CVEs in these images live
+# inside these precompiled Go binaries (terraform/terragrunt/gcloud), so a
+# version bump to a build with patched Go stdlib / deps is the primary lever.
+# terragrunt stays on the latest *stable* (1.1.0 is RC-only); its bundled
+# go-git CVEs are only fixed in the 1.1.0 line — adopt once it ships stable.
+ARG TERRAFORM_VERSION=1.15.6
 ARG TERRAGRUNT_VERSION=1.0.8
-ARG AWSCLI_VERSION=2.34.36
-ARG GCLOUD_VERSION=565.0.0
+ARG AWSCLI_VERSION=2.35.11
+ARG GCLOUD_VERSION=573.0.0
 
 # ============================================================
 # Stage: common binaries (mise, terraform, terragrunt)
@@ -113,12 +119,24 @@ ARG TARGETARCH
 RUN GCLOUD_ARCH=$([ "${TARGETARCH:-amd64}" = "arm64" ] && echo arm || echo x86_64) && \
     curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_VERSION}-linux-${GCLOUD_ARCH}.tar.gz" -o gcloud.tgz && \
     mkdir -p /opt && tar -xzf gcloud.tgz -C /opt && rm gcloud.tgz && \
-    # Drop components not used by terrahawk to shave ~150MB
+    # Drop components not used by terrahawk to shave size AND cut CVEs.
+    # terrahawk only ever runs `gcloud storage objects list` (state_age.py),
+    # so the gsutil/bq surfaces and their bundled vulnerable Go/Python
+    # binaries (docker-credential-gcloud, dev_appserver, etc.) are dead weight.
+    # Keep: gcloud, gcloud-crc32c (storage checksums), bootstrapping.
     rm -rf /opt/google-cloud-sdk/help \
     /opt/google-cloud-sdk/platform/bundledpythonunix \
     /opt/google-cloud-sdk/platform/ext-runtime \
+    /opt/google-cloud-sdk/platform/gsutil \
+    /opt/google-cloud-sdk/platform/bq \
+    /opt/google-cloud-sdk/platform/google_appengine \
     /opt/google-cloud-sdk/.install/.backup \
-    /opt/google-cloud-sdk/platform/gsutil/third_party/gcs-oauth2-boto-plugin/.git && \
+    /opt/google-cloud-sdk/bin/gsutil \
+    /opt/google-cloud-sdk/bin/bq \
+    /opt/google-cloud-sdk/bin/docker-credential-gcloud \
+    /opt/google-cloud-sdk/bin/git-credential-gcloud.sh \
+    /opt/google-cloud-sdk/bin/dev_appserver.py \
+    /opt/google-cloud-sdk/bin/java_dev_appserver.sh && \
     find /opt/google-cloud-sdk -type f -name '*.pyc' -delete && \
     find /opt/google-cloud-sdk -type d -name __pycache__ -prune -exec rm -rf {} +
 
@@ -156,6 +174,16 @@ RUN if [ "${CLOUD}" = "azure" ]; then \
 # gcloud also ships a bash launcher that execs python, so python:3.13-slim
 # is a natural common base (it matches the pip-builder's interpreter too).
 # ============================================================
+# Base image: python:3.13-slim (Debian trixie). NOT Alpine — Docker Scout
+# rates an Alpine base as 0-CVE, but that only measures the base layer; our
+# CVEs ride inside glibc-built Go binaries (terraform/terragrunt/gcloud/aws),
+# which will not run on musl without a glibc-compat shim. Net: Alpine trades
+# real breakage for a cosmetic base score, so we stay on glibc Debian.
+#
+# `perl` carries a residual critical/high here, but `git` hard-depends on it
+# (apt refuses to purge perl without removing git, which terrahawk needs to
+# restore .terraform.lock.hcl). It is absorbed via periodic rebuilds as
+# Debian ships the trixie-security patch — enforced by scripts/build-push.sh.
 FROM python:3.13-slim AS runtime-base
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates git openssh-client && \
@@ -201,9 +229,9 @@ COPY --from=binaries /tools/mise             /usr/local/bin/mise
 COPY --from=binaries /tools/terraform        /usr/local/bin/terraform
 COPY --from=binaries /tools/terragrunt       /usr/local/bin/terragrunt
 COPY --from=binaries /opt/google-cloud-sdk   /opt/google-cloud-sdk
-RUN ln -s /opt/google-cloud-sdk/bin/gcloud  /usr/local/bin/gcloud && \
-    ln -s /opt/google-cloud-sdk/bin/gsutil  /usr/local/bin/gsutil && \
-    ln -s /opt/google-cloud-sdk/bin/bq      /usr/local/bin/bq
+# Only gcloud is linked — gsutil/bq are stripped from the SDK above (unused by
+# terrahawk, and their bundled binaries carried critical/high CVEs).
+RUN ln -s /opt/google-cloud-sdk/bin/gcloud  /usr/local/bin/gcloud
 COPY --from=pip-builder /install/lib         /usr/local/lib
 COPY --from=pip-builder /install/bin         /usr/local/bin
 USER nonroot

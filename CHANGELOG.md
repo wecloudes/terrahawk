@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-23
+
+### Security
+
+- **Docker image CVE reduction** — addressed Docker Scout findings (all critical/high CVEs live inside the bundled precompiled Go binaries, not the Debian base):
+  - Bumped pinned tools to builds with patched Go stdlib/deps: Terraform `1.15.2 → 1.15.6`, AWS CLI `2.34.36 → 2.35.11`, gcloud `565.0.0 → 573.0.0`. (Terragrunt stays on the latest stable `1.0.8`; its bundled go-git CVEs are only fixed in the RC-only `1.1.0` line, adopted once stable.)
+  - **Stripped unused gcloud surfaces** (gsutil, bq, app-engine, docker/git credential helpers) from the GCP image — terrahawk only runs `gcloud storage objects list`, so those bundled vulnerable binaries were dead weight; removing them cuts CVEs and size.
+  - Added `scripts/build-push.sh` — manual release pipeline that builds, runs a `docker scout` gate, and pushes only on pass (configurable `GATE`, `DRY_RUN`, `ALLOW_KNOWN`).
+  - Documented in the Dockerfile why Alpine is **not** adopted (glibc-built tool binaries can't run on musl; Scout's 0-CVE Alpine score is base-layer-only) and why `perl` can't be purged (git hard-depends on it).
+
 ## [1.3.0] - 2026-06-23
 
 ### Added
