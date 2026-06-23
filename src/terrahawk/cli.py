@@ -21,6 +21,7 @@ from .state_age import query_blob_dates, extract_root_provider_template
 from .report import generate_report
 from .graph import cmd_graph
 from .hygiene import check_hygiene, attach_hygiene
+from .push import maybe_push
 
 
 def _parse_args(repo_root):
@@ -48,6 +49,11 @@ def _parse_args(repo_root):
     parser.add_argument("--exclude", type=str, default=config.get("exclude", ""))
     parser.add_argument("--terraform-version", type=str, default=config.get("terraform_version", ""))
     parser.add_argument("--terragrunt-version", type=str, default=config.get("terragrunt_version", ""))
+    parser.add_argument("--push-url", type=str, default=config.get("push_url") or None,
+                        help="Terrakettle base URL to publish the report to after the scan")
+    parser.add_argument("--push-token", type=str,
+                        default=config.get("push_token") or os.environ.get("TERRAKETTLE_TOKEN"),
+                        help="Terrakettle per-project push token (default: $TERRAKETTLE_TOKEN)")
     parser.add_argument("--version", action="version", version=f"terrahawk {__version__}")
     return parser.parse_args()
 
@@ -460,6 +466,9 @@ def main():
 
     # Summary
     _print_summary(results, total_to_scan, html_report, json_report, args)
+
+    # Publish to Terrakettle (no-op unless --push-url configured)
+    maybe_push(args, json_report, html_report)
 
     # Cleanup
     _cleanup(tmp_dir, repo_root)

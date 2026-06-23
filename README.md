@@ -165,6 +165,8 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `--exclude` | `""` | Regex pattern to exclude unit paths |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
+| `--push-url` | `None` | Publish the report to a [Terrakettle](../terrakettle) server after the scan |
+| `--push-token` | `$TERRAKETTLE_TOKEN` | Per-project Terrakettle push token |
 | `--version` | | Print version and exit |
 
 ### Subcommands
@@ -255,6 +257,11 @@ incremental: false
 dag: false
 exclude: "bootstrapping|test"
 
+# Publish the report to a Terrakettle server after each scan (optional).
+# The token is per-project; prefer the $TERRAKETTLE_TOKEN env var in CI.
+push_url: "https://terrakettle.example.com"
+push_token: ""
+
 # Pin Terraform/Terragrunt versions (requires mise).
 # When set, all commands are run via `mise exec <tool>@<version> --`.
 # Omit or leave empty to use whatever is on PATH.
@@ -285,6 +292,16 @@ Each run produces three files in `terrahawk_results/`:
 The HTML + `_data.js` pair work everywhere: `file://`, S3, Azure Blob, GCS, any static hosting. Just keep them in the same directory.
 
 When using `--incremental`, a `.manifest` file is also written to track file hashes between runs.
+
+### Publishing to Terrakettle
+
+Pass `--push-url` (and a token via `--push-token` or `$TERRAKETTLE_TOKEN`) to publish the report to a [Terrakettle](../terrakettle) server, which stores run history per project and serves the interactive HTML report over the web:
+
+```bash
+terrahawk --push-url https://terrakettle.example.com   # token from $TERRAKETTLE_TOKEN
+```
+
+The push runs after the report is written and uses only the standard library. A push failure prints a warning but does not fail the scan.
 
 ---
 
@@ -366,6 +383,7 @@ terrahawk/
 │   ├── process.py               # Result processing and assembly
 │   ├── state_age.py             # Remote state age queries (Azure/AWS/GCS)
 │   ├── report.py                # HTML report generation
+│   ├── push.py                  # Publish report to a Terrakettle server
 │   ├── tui.py                   # Terminal UI viewer (curses-based)
 │   └── templates/
 │       ├── report.html          # HTML report template

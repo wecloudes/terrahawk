@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Publish to Terrakettle** (`--push-url`, `--push-token`) — after a scan, the report triple (JSON + HTML + `_data.js`) is uploaded to a [Terrakettle](../terrakettle) server via `POST /api/v1/runs`, which stores per-project run history and serves the interactive report over the web. Token comes from `--push-token` or `$TERRAKETTLE_TOKEN`; both are also configurable via `.terrahawk.yml`. Stdlib-only (`urllib` + hand-rolled multipart, Bearer auth); a push failure prints a warning but never fails the scan.
+
 ## [1.2.0] - 2026-06-11
 
 ### Added

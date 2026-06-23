@@ -180,6 +180,7 @@ terrahawk/
 │   ├── graph.py                 # terragrunt dag graph → Mermaid (terrahawk graph)
 │   ├── hygiene.py               # hcl validate + hcl format --check (per-unit annotations)
 │   ├── tui.py                   # Terminal UI viewer (curses-based)
+│   ├── push.py                  # Publish report to a Terrakettle server (--push-url)
 │   └── templates/
 │       ├── report.html          # Self-contained HTML report template
 │       ├── eagle.svg            # Logo (light theme)
@@ -194,7 +195,7 @@ terrahawk/
 
 ```
 cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
-           worker.py, process.py, state_age.py, report.py, tui.py
+           worker.py, process.py, state_age.py, report.py, tui.py, push.py
 worker.py ──→ deps.py (mise_cmd helper)
 discovery.py ──→ deps.py (mise_cmd helper)
 graph.py ──→ deps.py (mise_cmd helper)
@@ -220,6 +221,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 | `state_age.py` | Queries remote state backends for last-modified dates. Scoped to `remote_state.config` block to avoid matching provider block values. Resolves `${local.X}` interpolations via sibling HCL files |
 | `report.py` | Writes a companion `_data.js` file and generates the HTML report that loads it via `<script src>`. Config flags injected via `%%PLACEHOLDER%%` substitution |
 | `tui.py` | Curses-based terminal viewer for JSON reports. Launched via `terrahawk view [report]`. Modes: list (grouped by env/sub, coverage bar, status/sub/tag/search filters, sort), detail (scrollable diffs with wrap toggle), plan (expandable per-resource diffs with action/type filters), module (tabular providers/inputs/outputs/tags), diagram (in-terminal or browser). Mouse and resize support |
+| `push.py` | Publishes the report triple (JSON + HTML + `_data.js`) to a Terrakettle server via `POST /api/v1/runs` (stdlib `urllib`, hand-rolled multipart, Bearer token). `maybe_push()` runs after the scan when `--push-url` is set; failures warn but never fail the scan |
 
 ### Execution Pipeline
 
