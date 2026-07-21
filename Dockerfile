@@ -182,10 +182,12 @@ RUN if [ "${CLOUD}" = "azure" ]; then \
 # which will not run on musl without a glibc-compat shim. Net: Alpine trades
 # real breakage for a cosmetic base score, so we stay on glibc Debian.
 #
-# `perl` carries a residual critical/high here, but `git` hard-depends on it
-# (apt refuses to purge perl without removing git, which terrahawk needs to
-# restore .terraform.lock.hcl). It is absorbed via periodic rebuilds as
-# Debian ships the trixie-security patch — enforced by scripts/build-push.sh.
+# `perl` carries an UNFIXABLE critical (CVE-2026-12087, "not fixed" on both
+# Debian 12 and 13 — pinning -bookworm does not dodge it), but `git`
+# hard-depends on it (apt refuses to purge perl without removing git, which
+# terrahawk needs to restore .terraform.lock.hcl). Pushed via ALLOW_KNOWN=1
+# and absorbed via periodic rebuilds once Debian ships the perl-security
+# patch — enforced by scripts/build-push.sh.
 FROM python:3.13-slim AS runtime-base
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates git openssh-client && \
