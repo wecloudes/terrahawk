@@ -38,10 +38,12 @@ ARG CLOUD=aws
 # (scripts/build-push.sh) before publishing. Most CVEs in these images live
 # inside these precompiled Go binaries (terraform/terragrunt/gcloud), so a
 # version bump to a build with patched Go stdlib / deps is the primary lever.
-# terragrunt stays on the latest *stable* (1.1.0 is RC-only); its bundled
-# go-git CVEs are only fixed in the 1.1.0 line — adopt once it ships stable.
+# terragrunt tracks the latest *stable* (1.1.x line: backwards-compat
+# guaranteed since 1.0, go-git CVEs patched). 1.1.x also brings CAS
+# (source-download dedup across parallel units), generated-stack detection
+# in find/git-filters, S3 chained-role fix, and lockfile-readonly support.
 ARG TERRAFORM_VERSION=1.15.6
-ARG TERRAGRUNT_VERSION=1.0.8
+ARG TERRAGRUNT_VERSION=1.1.1
 ARG AWSCLI_VERSION=2.35.11
 ARG GCLOUD_VERSION=573.0.0
 

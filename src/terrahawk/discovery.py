@@ -82,7 +82,11 @@ def _discover_rglob(config_dir):
     """Fallback discovery: glob for terragrunt.hcl files (pre-1.x terragrunt)."""
     units = []
     for tg_file in sorted(config_dir.rglob("terragrunt.hcl")):
-        if ".terragrunt-cache" in str(tg_file):
+        # Skip generated artifacts: .terragrunt-cache (working dirs) and
+        # .terragrunt-stack (units materialised from terragrunt.stack.hcl).
+        # Stacks are a 1.x feature handled by the native `find` path; on the
+        # pre-1.x fallback these dirs are only stale leftovers.
+        if ".terragrunt-cache" in str(tg_file) or ".terragrunt-stack" in str(tg_file):
             continue
         unit_dir = tg_file.parent
         if unit_dir == config_dir:

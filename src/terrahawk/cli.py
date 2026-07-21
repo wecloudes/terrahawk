@@ -42,11 +42,16 @@ def _parse_args(repo_root):
     parser.add_argument("--affected", nargs="?", const="main", default=config.get("affected") or None,
                         metavar="BASE",
                         help="Scan only units affected by git changes since BASE (default: main). "
-                             "Uses terragrunt's --filter=[BASE...HEAD]; unaffected units are merged from the previous report")
+                             "Uses terragrunt's --filter=[BASE...HEAD]; unaffected units are merged from the previous report. "
+                             "Terragrunt >=1.0.7 also tracks local module sources / tfr:// registry as read files, "
+                             "so edits to a local module correctly mark its consumers affected")
     parser.add_argument("--dag", action="store_true", default=config.get("dag") == "true")
     parser.add_argument("-u", "--unit", type=str, default=None,
                         help="Scan only the unit whose relative path matches this value (e.g., 'production/westeurope/app-gw')")
     parser.add_argument("--exclude", type=str, default=config.get("exclude", ""))
+    parser.add_argument("--no-hooks", action="store_true", default=config.get("no_hooks") == "true",
+                        help="Skip before_hook/after_hook/error_hook blocks during plan for a pure read-only "
+                             "drift scan (Terragrunt experimental 'optional-hooks'; requires Terragrunt >=1.0.8)")
     parser.add_argument("--terraform-version", type=str, default=config.get("terraform_version", ""))
     parser.add_argument("--terragrunt-version", type=str, default=config.get("terragrunt_version", ""))
     parser.add_argument("--push-url", type=str, default=config.get("push_url") or None,

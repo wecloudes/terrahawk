@@ -69,7 +69,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     tg_ver = getattr(args, "terragrunt_version", "")
 
     plan_file = os.path.join(tmp_dir, f"plan_{idx}.tfplan")
-    plan_cmd = mise_cmd("terragrunt", tg_ver, [
+    plan_args = [
         "plan", "-detailed-exitcode", "-input=false",
         "-lock=false", "-no-color",
         f"-out={plan_file}",
@@ -79,7 +79,13 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         # spawning `terraform output` in each dependency — big speedup on
         # deep DAGs, and safe for a read-only scanner.
         "--dependency-fetch-output-from-state",
-    ])
+    ]
+    # Optional: skip before/after/error hooks for a pure read-only drift scan
+    # (Terragrunt experimental "optional-hooks", needs the experiment enabled).
+    if getattr(args, "no_hooks", False):
+        plan_args.insert(1, "--experiment=optional-hooks")
+        plan_args.insert(2, "--no-hooks")
+    plan_cmd = mise_cmd("terragrunt", tg_ver, plan_args)
 
     retryable_errors = ["Failed to query available provider packages",
                         "Failed to install provider",

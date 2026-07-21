@@ -310,6 +310,8 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 
 **Affected scanning** (`--affected [BASE]`): discovery runs `terragrunt find --filter=[BASE...HEAD]` (git-aware), scanning only units whose files — including local module sources and read files — changed since BASE. Unaffected units merge from the previous report like incremental mode. Requires Terragrunt 1.x + git; errors out otherwise (no silent fallback).
 
+**No-hooks mode** (`--no-hooks`): appends `--experiment=optional-hooks --no-hooks` to the per-unit `terragrunt plan` (`worker.py`), skipping `before_hook`/`after_hook`/`error_hook` blocks for a pure read-only drift scan. Opt-in, default off; Terragrunt experimental feature (needs Terragrunt ≥1.0.8). Older terragrunt will error if the flag is passed — keep it opt-in.
+
 **HCL hygiene**: every scan runs `terragrunt hcl validate --json` + `terragrunt hcl format --check` once over the tree (`hygiene.py`). Findings map to units by path prefix → `hclIssues` / `unformattedFiles` entry fields → `hcl N` / `fmt` badges (HTML) and detail sections (TUI). Root-level findings print as console warnings. Silently skipped on pre-1.x terragrunt.
 
 **Error classification**: Exit code 0 = clean, 2 = drift, 124/137 = timeout, anything else = error. Error output is extracted by matching Terraform error block patterns.

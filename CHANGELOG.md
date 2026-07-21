@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-21
+
+### Added
+
+- **`--no-hooks` flag** — skip `before_hook`/`after_hook`/`error_hook` blocks during `terragrunt plan` for a pure read-only drift scan. Appends Terragrunt's experimental `--experiment=optional-hooks --no-hooks` to the per-unit plan. Opt-in (default off); also configurable via `.terrahawk.yml`. Requires Terragrunt ≥1.0.8.
+
+### Changed
+
+- **Bumped pinned Terragrunt `1.0.8 → 1.1.1`** (now GA, backwards-compat guaranteed since 1.0). Brings the Content Addressable Store (deduplicates module source downloads across the many units scanned in parallel), generated-stack detection in `find`/git-filters, an S3 chained-role-assumption fix, `-lockfile=readonly` support, and patched go-git CVEs.
+- **`--affected` accuracy** — with Terragrunt ≥1.0.7, edits to a local module source (and `tfr://` registry sources) are tracked as read files, so a module change correctly marks its consuming units as affected. Help text updated to note this.
+
+### Fixed
+
+- **rglob discovery fallback** now skips generated `.terragrunt-stack` directories (as it already does for `.terragrunt-cache`), preventing stale materialised stack units from being scanned on the pre-1.x fallback path.
+
 ## [1.3.1] - 2026-06-23
 
 ### Security

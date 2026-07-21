@@ -148,7 +148,7 @@ docker run --rm \
 ```
 usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
                  [--diagrams] [--tags] [--incremental] [--dag]
-                 [--exclude EXCLUDE] [--terraform-version VERSION]
+                 [--exclude EXCLUDE] [--no-hooks] [--terraform-version VERSION]
                  [--terragrunt-version VERSION] [--version]
 ```
 
@@ -163,6 +163,7 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `--incremental` | `false` | Only re-scan changed units since the last report |
 | `--dag` | `false` | Execute units in dependency order (topological waves) |
 | `--exclude` | `""` | Regex pattern to exclude unit paths |
+| `--no-hooks` | `false` | Skip `before_hook`/`after_hook`/`error_hook` for a pure read-only drift scan (Terragrunt experimental `optional-hooks`, requires Terragrunt ≥1.0.8) |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
 | `--push-url` | `None` | Publish the report to a [Terrakettle](../terrakettle) server after the scan |
