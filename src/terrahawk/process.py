@@ -490,7 +490,19 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
     exit_code = raw.get("exit_code", 1)
     plan_output = raw.get("plan_output", "")
 
-    segments = rel_path.split("/")
+    # Explicit-stack units live under `<stack root>/.terragrunt-stack/<unit>`.
+    # Flag them and collapse the generated marker out of the display path so
+    # grouping/segments read cleanly (env/sub/region/app) and the report can
+    # show a stack badge instead of a noisy `.terragrunt-stack` prefix.
+    is_stack = "/.terragrunt-stack/" in ("/" + rel_path)
+    stack_name = ""
+    display_path = rel_path
+    if is_stack:
+        before, _, after = rel_path.partition("/.terragrunt-stack/")
+        stack_name = before.rsplit("/", 1)[-1]
+        display_path = f"{before}/{after}" if after else before
+
+    segments = display_path.split("/")
     env = segments[0] if len(segments) > 0 else ""
     sub = segments[1] if len(segments) > 1 else ""
     reg = segments[2] if len(segments) > 2 else ""
@@ -525,6 +537,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
 
     return {
         "unit": rel_path, "status": status, "exit_code": exit_code,
+        "displayUnit": display_path, "isStack": is_stack, "stackName": stack_name,
         "environment": env, "subscription": sub, "region": reg, "application": app,
         "summary": summary, "diff": diff, "error": error,
         "planResources": plan_resources,
@@ -538,3 +551,81 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
         "duration": raw.get("duration"),
         "driftedResources": drifted_resources,
     }
+
+
+# Mermaid node classes coloured to match the report's status palette.
+_STACK_NODE_CLS = {
+    "clean": "cCl", "drift": "cDr", "error": "cEr", "timeout": "cTo",
+}
+_STACK_CLASSDEFS = [
+    "classDef cCl fill:#12261e,stroke:#1a4028,color:#3fb950;",
+    "classDef cDr fill:#2a2013,stroke:#4d3a12,color:#d29922;",
+    "classDef cEr fill:#2d1214,stroke:#5a1d23,color:#f85149;",
+    "classDef cTo fill:#2d1a08,stroke:#5a3410,color:#e8863a;",
+]
+
+
+def build_stack_graphs(results, deps, dir_by_relpath):
+    """Build a units-in-stack Mermaid graph per explicit stack.
+
+    One diagram per stack root: member units are nodes (coloured by status),
+    edges are the intra-stack dependencies (dependency → dependent) taken from
+    the discovery DAG. Units depending on things outside the stack are not
+    linked (only member-to-member edges are drawn).
+
+    results: processed entries (need unit/isStack/stackName/status).
+    deps: {unit_dir: set(dependency_unit_dirs)} from native discovery, or None
+          (rglob fallback) in which case nodes are drawn without edges.
+    dir_by_relpath: {rel_path: unit_dir} mapping entries to DAG keys.
+
+    Returns a list of {name, root, mermaid, unitCount} sorted by root. Empty
+    when there are no stack units.
+    """
+    deps = deps or {}
+    marker = "/.terragrunt-stack/"
+
+    grouped = {}
+    for e in results:
+        if not e.get("isStack"):
+            continue
+        root = e["unit"].partition(marker)[0]
+        grouped.setdefault(root, []).append(e)
+
+    graphs = []
+    for root in sorted(grouped):
+        members = sorted(grouped[root], key=lambda x: x["unit"])
+        node_of = {}          # rel_path -> node id
+        dir_of = {}           # unit_dir -> node id (members only)
+        for i, e in enumerate(members):
+            nid = f"n{i}"
+            node_of[e["unit"]] = nid
+            d = dir_by_relpath.get(e["unit"])
+            if d:
+                dir_of[d] = nid
+
+        lines = ["flowchart TD"]
+        for e in members:
+            nid = node_of[e["unit"]]
+            label = e["unit"].partition(marker)[2] or e.get("stackName", "")
+            label = label.replace('"', "'")
+            cls = _STACK_NODE_CLS.get(e.get("status", ""), "cCl")
+            lines.append(f'  {nid}["{label}"]:::{cls}')
+
+        member_dirs = set(dir_of)
+        for e in members:
+            dst = node_of[e["unit"]]
+            d = dir_by_relpath.get(e["unit"])
+            if not d:
+                continue
+            for dep_dir in deps.get(d, ()):
+                if dep_dir in member_dirs:
+                    lines.append(f"  {dir_of[dep_dir]} --> {dst}")
+        lines.extend(_STACK_CLASSDEFS)
+
+        graphs.append({
+            "name": members[0].get("stackName") or root.rsplit("/", 1)[-1],
+            "root": root,
+            "mermaid": "\n".join(lines),
+            "unitCount": len(members),
+        })
+    return graphs

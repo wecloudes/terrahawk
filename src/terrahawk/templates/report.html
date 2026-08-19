@@ -8,6 +8,12 @@
 [data-theme="light"]{--bg:#fff;--surface:#f6f8fa;--border:#d0d7de;--text:#1f2328;--text-muted:#656d76;--text-dim:#8b949e;--green:#1a7f37;--green-bg:#dafbe1;--green-border:#aceebb;--red:#cf222e;--red-bg:#ffebe9;--red-border:#ffcecb;--yellow:#9a6700;--yellow-bg:#fff8c5;--yellow-border:#f5e0a0;--blue:#0969da;--blue-bg:#ddf4ff;--blue-border:#b6e3ff;--cyan:#0a8a7a;--orange:#bc4c00;--orange-bg:#fff1e5;--orange-border:#ffd8b5;--hover:#f0f2f5;--diff-add-bg:#dafbe1;--diff-add-text:#1a7f37;--diff-del-bg:#ffebe9;--diff-del-text:#cf222e;--diff-change-bg:#fff8c5;--diff-change-text:#9a6700}
 .state-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap}
 .oob-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow-border);cursor:help}
+.stack-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:8px;white-space:nowrap;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border);cursor:help}
+.stacks-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+.stacks-bar .sb-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
+.stack-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--blue-border);color:var(--blue);padding:5px 12px;border-radius:20px;cursor:pointer;font-size:13px;transition:all .15s}
+.stack-chip:hover{background:var(--blue-bg);border-color:var(--blue)}
+.stack-chip .sc-count{font-size:11px;color:var(--text-muted)}
 .dur-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;color:var(--text-muted);border:1px solid var(--border)}
 .oob-content{padding:10px 16px;background:var(--yellow-bg);border-bottom:1px solid var(--border);font-family:'Roboto Mono',monospace;font-size:12px}
 .oob-title{color:var(--yellow);font-weight:600;margin-bottom:6px}
@@ -170,6 +176,7 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 <span id="toggle-group" style="display:flex;gap:4px"></span>
 </div>
 </div>
+<div id="stacks-bar"></div>
 <div id="results"></div>
 </div>
 <div class="modal-overlay" id="diagram-modal" onclick="if(event.target===this)closeModal('diagram-modal')">
@@ -220,6 +227,7 @@ function themeDiagram(mmd){
 <script src="%%DATA_FILE%%"></script>
 <script>
 const DATA=window.TERRAHAWK_DATA||[];
+const STACKS=window.TERRAHAWK_STACKS||[];
 const REPORT_DATE='%%REPORT_DATE%%';
 const HAS_DIAGRAMS=%%HAS_DIAGRAMS%%;
 const HAS_TAGS=%%HAS_TAGS%%;
@@ -278,6 +286,7 @@ function init(){
   if(HAS_DIAGRAMS)thtml+=`<button class="toggle-btn on" id="tog-diagrams" onclick="toggleView('diagrams')" title="Toggle architecture diagrams">\u{1f5fa}</button>`;
   if(HAS_TAGS)thtml+=`<button class="toggle-btn on" id="tog-tags" onclick="toggleView('tags')" title="Toggle resource tags">\u{1f3f7}</button>`;
   tg.innerHTML=thtml;
+  renderStacksBar();
   render();
 }
 function toggleView(which){
@@ -685,7 +694,8 @@ function render(){
       const hasPlan=u.status==='drift'&&(u.planResources||[]).length>0;
       html+=`<div class="unit-row status-${u.status} ${exp?'has-diff':''}" ${exp?`onclick="toggleDiff('${uid}')"`:''}>`;
       const sq=document.getElementById('search').value.toLowerCase();
-      html+=`<div class="unit-status"></div><div class="unit-path">${fp(u.unit,sq)}</div>`;
+      const stkBadge=u.isStack?`<span class="stack-badge" title="Unit generated from a terragrunt.stack.hcl${u.stackName?' (stack: '+esc(u.stackName)+')':''}">▤ stack${u.stackName?' · '+esc(u.stackName):''}</span>`:'';
+      html+=`<div class="unit-status"></div><div class="unit-path">${fp(u.displayUnit||u.unit,sq)}${stkBadge}</div>`;
       if(u.summary)html+=`<div class="unit-summary">${esc(u.summary)}</div>`;
       // State age badge
       if(u.stateAgeDays!=null){const d=u.stateAgeDays;const cls=d>180?'state-180':d>90?'state-90':d>30?'state-30':'state-fresh';html+=`<span class="state-badge ${cls}" title="Last applied ${d} days ago">${d}d</span>`;}
@@ -731,11 +741,8 @@ function diagramFit(){const c=dCanvas(),v=dViewport();if(!c||!v)return;const svg
   if(!sw||!sh)return;
   dScale=Math.min(vw/sw,vh/sh)*0.9;dX=(vw-sw*dScale)/2;dY=(vh-sh*dScale)/2;dApply();}
 function diagramReset(){dScale=1;dX=0;dY=0;dApply();}
-async function showPlanDiagram(idx){
-  const u=DATA[idx];if(!u)return;
-  const mmd=u.planDiagram||'';
-  if(!mmd){openInfo('Plan Diagram \u2014 '+u.unit,'<p class="no-data">No plan diagram available. Run a full scan to generate dependency data.</p>',true);return;}
-  document.getElementById('diagram-title').textContent='Plan Diagram \u2014 '+u.unit;
+async function renderDiagramModal(title,mmd){
+  document.getElementById('diagram-title').textContent=title;
   const canvas=dCanvas();
   const id='mermaid-render-'+(diagramCounter++);
   try{
@@ -751,6 +758,24 @@ async function showPlanDiagram(idx){
   dScale=1;dX=0;dY=0;dApply();
   document.getElementById('diagram-modal').classList.add('open');
   setTimeout(diagramFit,50);
+}
+async function showPlanDiagram(idx){
+  const u=DATA[idx];if(!u)return;
+  const mmd=u.planDiagram||'';
+  if(!mmd){openInfo('Plan Diagram \u2014 '+u.unit,'<p class="no-data">No plan diagram available. Run a full scan to generate dependency data.</p>',true);return;}
+  renderDiagramModal('Plan Diagram \u2014 '+u.unit,mmd);
+}
+async function showStackDiagram(i){
+  const s=STACKS[i];if(!s)return;
+  renderDiagramModal('Stack \u2014 '+s.name+'  ('+s.unitCount+' units)',s.mermaid);
+}
+function renderStacksBar(){
+  const bar=document.getElementById('stacks-bar');if(!bar)return;
+  if(!STACKS.length){bar.className='';bar.innerHTML='';return;}
+  bar.className='stacks-bar';
+  let h='<span class="sb-label">\u25a4 Stacks</span>';
+  STACKS.forEach((s,i)=>{h+=`<span class="stack-chip" onclick="showStackDiagram(${i})" title="Show units-in-stack diagram for ${esc(s.root)}">\u{1f5fa}\ufe0f ${esc(s.name)} <span class="sc-count">${s.unitCount}</span></span>`;});
+  bar.innerHTML=h;
 }
 // Pan & zoom event handlers
 document.addEventListener('DOMContentLoaded',()=>{

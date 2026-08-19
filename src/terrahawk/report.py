@@ -19,11 +19,12 @@ def get_html_template():
     sys.exit(1)
 
 
-def generate_report(results, html_report, report_date, versions, args):
+def generate_report(results, html_report, report_date, versions, args, stack_graphs=None):
     """Generate the HTML report and a companion JS data file.
 
     The data file is a plain JS file that assigns the results array to
-    ``window.TERRAHAWK_DATA``.  The HTML loads it via a ``<script src>`` tag,
+    ``window.TERRAHAWK_DATA`` (and the per-stack diagrams to
+    ``window.TERRAHAWK_STACKS``).  The HTML loads it via a ``<script src>`` tag,
     which works from ``file://``, S3, Azure Blob, GCS — anywhere static
     files can be served or opened directly.
     """
@@ -34,6 +35,7 @@ def generate_report(results, html_report, report_date, versions, args):
     # Write the data as a JS file
     data_js_path.write_text(
         "window.TERRAHAWK_DATA=" + json.dumps(results, ensure_ascii=False) + ";\n"
+        "window.TERRAHAWK_STACKS=" + json.dumps(stack_graphs or [], ensure_ascii=False) + ";\n"
     )
 
     # Generate the HTML referencing the data file

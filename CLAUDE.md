@@ -57,6 +57,18 @@ A **unit** is any subdirectory of `config_dir` that contains a `terragrunt.hcl` 
 - The `--exclude` regex is matched against `rel_path`
 - The `--unit` flag filters to a single unit by exact `rel_path` match or suffix match (e.g., `--unit app-gateway` matches `production/westeurope/app-gateway`)
 
+### Stacks (terragrunt.stack.hcl)
+
+Explicit stacks define units in a `terragrunt.stack.hcl` file; those units only exist on disk (under `.terragrunt-stack/`) **after** `terragrunt stack generate` runs. Terrahawk handles this automatically:
+
+- Before discovery, `generate_stacks()` (`discovery.py`) globs `config_dir` for source `terragrunt.stack.hcl` files (skipping `.terragrunt-cache` / `.terragrunt-stack`) and runs `terragrunt stack generate --working-dir=<stack root>` in each. Nested stacks materialise recursively.
+- The native `find` path then surfaces the generated units as `type=unit` — no discovery change needed. Each drift-scans and reports like a normal unit; the on-disk `rel_path` keeps the `.terragrunt-stack/` segment (used as canonical id + state key).
+- **Presentation**: `process_result()` flags these units — `isStack: true`, `stackName` (the stack root's basename), and `displayUnit` (the `.terragrunt-stack/` marker collapsed out). Environment/subscription/region/application segments are derived from `displayUnit`, so grouping isn't polluted by the marker. The HTML report shows a blue `▤ stack · <name>` badge and renders `displayUnit`; the TUI shows an `S` indicator in the list and a `Stack:` line in the detail view. Per-unit architecture diagrams work unchanged (built from the generated unit's own plan/state JSON).
+- **Units-in-stack diagram**: `build_stack_graphs(results, deps, dir_by_relpath)` (`process.py`) emits one Mermaid graph per stack root — member units as nodes (coloured by status), intra-stack `dependency → dependent` edges from the discovery DAG. Written to the companion `_data.js` as `window.TERRAHAWK_STACKS` (list of `{name, root, mermaid, unitCount}`). The report shows a "▤ Stacks" chip bar above the unit list; clicking a chip opens the graph in the shared pan/zoom Mermaid modal (`showStackDiagram` → `renderDiagramModal`). Edges need native discovery (`deps`); on the rglob fallback, nodes render without edges.
+- **Auto-detected**: no stack files → no-op. Disable with `--no-stacks` (or `no_stacks: true` in `.terrahawk.yml`) to leave a user-managed `.terragrunt-stack` tree untouched.
+- **Cleanup**: `_cleanup(clean_stacks=True)` removes generated `.terragrunt-stack` trees after the scan — but **only** when this run generated them (never touches a pre-existing tree, i.e. when `--no-stacks` was set).
+- Requires Terragrunt 1.x. On older terragrunt `stack generate` errors; the failure is counted and warned, and the scan proceeds with whatever units `find` returns.
+
 ### Per-Unit Data Collection
 
 After `terragrunt plan`, the worker (`worker.py`) collects additional data from the `.terragrunt-cache` working directory:
@@ -217,7 +229,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 | `incremental.py` | MD5-based manifest for incremental scanning |
 | `worker.py` | Runs `terragrunt plan` + terraform show/output per unit |
 | `plan_parser.py` | Extracts structured resource changes from `terraform plan` text output |
-| `process.py` | Transforms raw worker results into report entries. Sub-processors: `_classify_status`, `_process_diagram`, `_process_tags`, `_process_outputs`, `_process_inputs`, `_process_providers`, `_process_module_source`, `_compute_state_age` |
+| `process.py` | Transforms raw worker results into report entries. Sub-processors: `_classify_status`, `_process_diagram`, `_process_tags`, `_process_outputs`, `_process_inputs`, `_process_providers`, `_process_module_source`, `_compute_state_age`. Also `build_stack_graphs` (per-stack units-in-stack Mermaid) |
 | `state_age.py` | Queries remote state backends for last-modified dates. Scoped to `remote_state.config` block to avoid matching provider block values. Resolves `${local.X}` interpolations via sibling HCL files |
 | `report.py` | Writes a companion `_data.js` file and generates the HTML report that loads it via `<script src>`. Config flags injected via `%%PLACEHOLDER%%` substitution |
 | `tui.py` | Curses-based terminal viewer for JSON reports. Launched via `terrahawk view [report]`. Modes: list (grouped by env/sub, coverage bar, status/sub/tag/search filters, sort), detail (scrollable diffs with wrap toggle), plan (expandable per-resource diffs with action/type filters), module (tabular providers/inputs/outputs/tags), diagram (in-terminal or browser). Mouse and resize support |
@@ -232,6 +244,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 4. Check dependencies
 5. Setup output dirs and paths
 6. detect_config_dir → find terragrunt root
+6b. Generate explicit stacks (terragrunt.stack.hcl → .terragrunt-stack) unless --no-stacks
 7. Discover units (rglob terragrunt.hcl)
 7b. Apply --unit filter (if --unit)
 8. Apply incremental filter (if --incremental)
@@ -242,14 +255,14 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 13. Process results (plan parsing, diagrams, tags, etc.)
 14. Merge incremental results from previous report
 15. Write JSON + manifest + HTML report
-16. Cleanup tmp dir, restore .terraform.lock.hcl files
+16. Cleanup tmp dir, restore .terraform.lock.hcl files, remove generated .terragrunt-stack trees
 ```
 
 ### HTML Report Template
 
 The report at `src/terrahawk/templates/report.html` has all CSS and JavaScript inline. External dependencies: the Mermaid CDN for diagram rendering and a companion `_data.js` file for the report data.
 
-The `_data.js` file is written by `report.py` and contains `window.TERRAHAWK_DATA=[...];`. The HTML loads it via `<script src="%%DATA_FILE%%">`, which works from `file://`, S3, Azure Blob, GCS, or any static hosting (no CORS issues, no server required).
+The `_data.js` file is written by `report.py` and contains `window.TERRAHAWK_DATA=[...];` (plus `window.TERRAHAWK_STACKS=[...];` for per-stack diagrams). The HTML loads it via `<script src="%%DATA_FILE%%">`, which works from `file://`, S3, Azure Blob, GCS, or any static hosting (no CORS issues, no server required).
 
 Placeholders injected via substitution:
 - `%%DATA_FILE%%` — filename of the companion `_data.js` file
@@ -309,6 +322,8 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 **Incremental scanning**: Each unit's `terragrunt.hcl` is MD5-hashed. Only units whose hash changed since the last manifest are re-scanned. Previous results are merged from the last JSON report.
 
 **Affected scanning** (`--affected [BASE]`): discovery runs `terragrunt find --filter=[BASE...HEAD]` (git-aware), scanning only units whose files — including local module sources and read files — changed since BASE. Unaffected units merge from the previous report like incremental mode. Requires Terragrunt 1.x + git; errors out otherwise (no silent fallback).
+
+**Stack generation** (`--no-stacks` to disable): explicit stacks (`terragrunt.stack.hcl`) are auto-materialised via `terragrunt stack generate` before discovery (`generate_stacks()` in `discovery.py`), so their units are discovered and drift-scanned like any other unit. Generated `.terragrunt-stack` trees are removed in cleanup, but only when this run generated them. Auto-detected (no stack files = no-op); requires Terragrunt 1.x.
 
 **No-hooks mode** (`--no-hooks`): appends `--experiment=optional-hooks --no-hooks` to the per-unit `terragrunt plan` (`worker.py`), skipping `before_hook`/`after_hook`/`error_hook` blocks for a pure read-only drift scan. Opt-in, default off; Terragrunt experimental feature (needs Terragrunt ≥1.0.8). Older terragrunt will error if the flag is passed — keep it opt-in.
 

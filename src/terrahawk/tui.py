@@ -503,13 +503,14 @@ def _draw_list(stdscr, rows, cursor, scroll, filters, all_units, sort_mode):
             age = f"{unit['stateAgeDays']}d" if unit.get("stateAgeDays") is not None else ""
             summary = unit.get("summary", "")
 
-            full_path = unit.get("unit", "")
+            full_path = unit.get("displayUnit") or unit.get("unit", "")
             segs = full_path.split("/")
             short_path = "/".join(segs[2:]) if len(segs) > 2 else (segs[-1] if segs else full_path)
 
             sc = {"clean": "+", "drift": "~", "error": "x", "timeout": "!"}.get(status, "?")
             has_diag = "D" if unit.get("planDiagram") else " "
             has_plan = "P" if unit.get("planResources") else " "
+            stk = "S" if unit.get("isStack") else " "
             # Warning flag: hcl issues / unformatted / out-of-band drift
             warn = "!" if (unit.get("hclIssues") or unit.get("unformattedFiles")
                            or unit.get("driftedResources")) else " "
@@ -517,7 +518,7 @@ def _draw_list(stdscr, rows, cursor, scroll, filters, all_units, sort_mode):
             tag_ind = f"T{ntags}" if ntags else "  "
             dur = f"{unit['duration']:.0f}s" if unit.get("duration") is not None else ""
 
-            right = f" {warn}{has_plan}{has_diag} {tag_ind:>3s} {res:>5s} {age:>6s} {dur:>5s}"
+            right = f" {stk}{warn}{has_plan}{has_diag} {tag_ind:>3s} {res:>5s} {age:>6s} {dur:>5s}"
             name_w = max(w - len(right) - 6, 10)
             if len(short_path) > name_w:
                 short_path = "..." + short_path[-(name_w - 3):]
@@ -548,6 +549,9 @@ def _format_detail(unit):
 
     lines.append((5, f" Unit: {unit['unit']}"))
     lines.append((color, f" Status: {status.upper()}"))
+    if unit.get("isStack"):
+        sn = unit.get("stackName") or ""
+        lines.append((5, f" Stack: {sn} (from terragrunt.stack.hcl)" if sn else " Stack: (from terragrunt.stack.hcl)"))
     lines.append((7, ""))
 
     if unit.get("moduleSource"):

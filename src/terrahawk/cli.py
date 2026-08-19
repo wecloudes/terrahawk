@@ -13,10 +13,10 @@ from pathlib import Path
 from . import __version__
 from .config import load_config, load_unit_timeouts, detect_config_dir
 from .deps import check_dependencies, get_versions
-from .discovery import discover_units, build_dag
+from .discovery import discover_units, build_dag, generate_stacks
 from .incremental import load_manifest, hash_file, save_manifest
 from .worker import run_plan
-from .process import process_result
+from .process import process_result, build_stack_graphs
 from .state_age import query_blob_dates, extract_root_provider_template
 from .report import generate_report
 from .graph import cmd_graph
@@ -52,6 +52,9 @@ def _parse_args(repo_root):
     parser.add_argument("--no-hooks", action="store_true", default=config.get("no_hooks") == "true",
                         help="Skip before_hook/after_hook/error_hook blocks during plan for a pure read-only "
                              "drift scan (Terragrunt experimental 'optional-hooks'; requires Terragrunt >=1.0.8)")
+    parser.add_argument("--no-stacks", action="store_true", default=config.get("no_stacks") == "true",
+                        help="Skip `terragrunt stack generate` for terragrunt.stack.hcl files. By default stacks "
+                             "are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x)")
     parser.add_argument("--terraform-version", type=str, default=config.get("terraform_version", ""))
     parser.add_argument("--terragrunt-version", type=str, default=config.get("terragrunt_version", ""))
     parser.add_argument("--push-url", type=str, default=config.get("push_url") or None,
@@ -193,7 +196,7 @@ def _assemble_results(raw_results, args, blob_dates, root_provider_tpl, last_jso
     return results
 
 
-def _write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args):
+def _write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args, stack_graphs=None):
     """Write JSON report, manifest, and HTML report."""
     # Write JSON
     with open(json_report, "w") as f:
@@ -204,7 +207,7 @@ def _write_outputs(results, json_report, html_report, manifest_path, config_dir,
 
     # Generate HTML
     print("\U0001f4dd Generating HTML report...")
-    generate_report(results, str(html_report), report_date, versions, args)
+    generate_report(results, str(html_report), report_date, versions, args, stack_graphs)
 
 
 def _print_summary(results, total_to_scan, html_report, json_report, args):
@@ -235,9 +238,17 @@ def _print_summary(results, total_to_scan, html_report, json_report, args):
 """)
 
 
-def _cleanup(tmp_dir, repo_root):
+def _cleanup(tmp_dir, repo_root, clean_stacks=False):
     """Clean up temporary files and restore git state."""
     shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # Remove stack trees we materialised from terragrunt.stack.hcl (only when
+    # this run generated them — never touch a user's pre-existing tree).
+    if clean_stacks:
+        subprocess.run(
+            'find . -type d -name ".terragrunt-stack" -prune -exec rm -rf {} +',
+            shell=True, cwd=str(repo_root), capture_output=True,
+        )
 
     # Discard any local changes (modified or untracked) to .terraform.lock.hcl
     # files that terragrunt may have regenerated during the scan.
@@ -398,6 +409,16 @@ def main():
   HTML report : {html_report}
 """)
 
+    # Materialise explicit stacks (terragrunt.stack.hcl) so their units are
+    # discoverable by `terragrunt find` and plannable by the worker. Auto-
+    # detected; disable with --no-stacks. Generated trees are cleaned up after.
+    generated_stacks = False
+    if not args.no_stacks:
+        n_stacks, n_failed = generate_stacks(config_dir, args.terragrunt_version)
+        if n_stacks:
+            generated_stacks = True
+            print(f"\U0001f4e6 Generated {n_stacks - n_failed}/{n_stacks} stack(s) from terragrunt.stack.hcl")
+
     # Discover units
     print("\U0001f4cb Discovering units...")
     filter_expr = f"[{args.affected}...HEAD]" if args.affected else None
@@ -407,6 +428,9 @@ def main():
         print(f"  ❌ {e}")
         sys.exit(1)
     total_discovered = len(units)
+    # Full rel_path -> unit_dir map (before --unit / incremental filtering) so
+    # per-stack diagrams can resolve DAG edges even for merged/unscanned units.
+    dir_by_relpath = {rp: ud for ud, rp in units}
     engine = "terragrunt find" if native_deps is not None else "glob fallback"
     print(f"  Found {total_discovered} units (via {engine})")
     if args.affected:
@@ -466,8 +490,14 @@ def main():
         for f in leftovers["unformatted"]:
             print(f"  ⚠️  Needs formatting: {f}")
 
+    # Build per-stack "units-in-stack" diagrams (empty when no stacks)
+    stack_graphs = build_stack_graphs(results, native_deps, dir_by_relpath)
+    if stack_graphs:
+        print(f"\U0001f5fa️  Built {len(stack_graphs)} stack diagram(s)")
+
     # Write outputs
-    _write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args)
+    _write_outputs(results, json_report, html_report, manifest_path, config_dir,
+                   report_date, versions, args, stack_graphs)
 
     # Summary
     _print_summary(results, total_to_scan, html_report, json_report, args)
@@ -476,4 +506,4 @@ def main():
     maybe_push(args, json_report, html_report)
 
     # Cleanup
-    _cleanup(tmp_dir, repo_root)
+    _cleanup(tmp_dir, repo_root, clean_stacks=generated_stacks)

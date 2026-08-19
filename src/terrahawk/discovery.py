@@ -9,6 +9,55 @@ from collections import defaultdict, deque
 from .deps import mise_cmd
 
 
+def find_stack_files(config_dir):
+    """Return dirs holding a *source* terragrunt.stack.hcl.
+
+    Excludes generated artifacts (`.terragrunt-cache`, `.terragrunt-stack`) so
+    only author-written stack roots are returned — nested stacks materialised
+    under `.terragrunt-stack` are handled recursively by `stack generate`.
+    """
+    stack_dirs = []
+    for sf in sorted(config_dir.rglob("terragrunt.stack.hcl")):
+        s = str(sf)
+        if ".terragrunt-cache" in s or ".terragrunt-stack" in s:
+            continue
+        stack_dirs.append(sf.parent)
+    return stack_dirs
+
+
+def generate_stacks(config_dir, tg_ver=""):
+    """Materialise explicit stacks (terragrunt.stack.hcl) into `.terragrunt-stack`.
+
+    Runs `terragrunt stack generate` in every directory that holds a source
+    terragrunt.stack.hcl, so the generated units become discoverable by
+    `terragrunt find` (as `type=unit`) and plannable by the worker. Requires
+    Terragrunt 1.x; older versions error and are reported as failures.
+
+    Returns (n_stacks, n_failed): number of stack roots found and how many
+    failed to generate. (0, 0) when no stacks exist (no-op).
+    """
+    stack_dirs = find_stack_files(config_dir)
+    if not stack_dirs:
+        return (0, 0)
+    failed = 0
+    for sd in stack_dirs:
+        cmd = mise_cmd("terragrunt", tg_ver, [
+            "stack", "generate",
+            f"--working-dir={os.path.realpath(str(sd))}",
+        ])
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if r.returncode != 0:
+                failed += 1
+                lines = (r.stderr or r.stdout).strip().splitlines()
+                tail = lines[-1] if lines else "unknown error"
+                print(f"  ⚠ stack generate failed in {sd}: {tail}")
+        except Exception as e:
+            failed += 1
+            print(f"  ⚠ stack generate errored in {sd}: {e}")
+    return (len(stack_dirs), failed)
+
+
 def discover_units(config_dir, exclude_pattern="", tg_ver="", filter_expr=None):
     """Find all terragrunt units.
 
