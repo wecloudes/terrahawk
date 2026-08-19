@@ -23,6 +23,7 @@ Designed to run on a daily schedule via CI/CD (GitHub Actions, GitLab CI, Azure 
 - **State Age** — Queries the remote state backend (Azure Blob, AWS S3, GCS) for last-modified dates. Informational blue badges showing days since last apply.
 - **Incremental Mode** (`--incremental`) — Only re-scans units whose `terragrunt.hcl` changed since the last report. Unchanged units are merged from the previous run.
 - **Dependency-Aware Execution** (`--dag`) — Parses `dependency` blocks to build a DAG and executes units in topological waves, ensuring correct plan order.
+- **Terragrunt Stacks** (auto, `--no-stacks` to disable) — Explicit stacks (`terragrunt.stack.hcl`) are auto-materialised via `terragrunt stack generate` before discovery, so their generated units are drift-scanned like any other unit. Stack units get a `▤ stack · <name>` badge, and each stack renders a **units-in-stack** Mermaid diagram (members coloured by status, intra-stack dependency edges) from a "▤ Stacks" chip bar. Generated trees are cleaned up afterwards. Requires Terragrunt 1.x.
 - **Dark/Light Theme** — Toggle in the report header, persisted via localStorage.
 - **CSV Export** — Export filtered results directly from the report.
 - **Terminal Viewer** (`terrahawk view`) — Interactive curses-based TUI to browse scan results directly in the terminal:
@@ -148,7 +149,7 @@ docker run --rm \
 ```
 usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
                  [--diagrams] [--tags] [--incremental] [--dag]
-                 [--exclude EXCLUDE] [--no-hooks] [--terraform-version VERSION]
+                 [--exclude EXCLUDE] [--no-hooks] [--no-stacks] [--terraform-version VERSION]
                  [--terragrunt-version VERSION] [--version]
 ```
 
@@ -164,6 +165,7 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `--dag` | `false` | Execute units in dependency order (topological waves) |
 | `--exclude` | `""` | Regex pattern to exclude unit paths |
 | `--no-hooks` | `false` | Skip `before_hook`/`after_hook`/`error_hook` for a pure read-only drift scan (Terragrunt experimental `optional-hooks`, requires Terragrunt ≥1.0.8) |
+| `--no-stacks` | `false` | Skip `terragrunt stack generate` for `terragrunt.stack.hcl` files. By default stacks are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x) |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
 | `--push-url` | `None` | Publish the report to a [Terrakettle](../terrakettle) server after the scan |
@@ -257,6 +259,8 @@ tags: true
 incremental: false
 dag: false
 exclude: "bootstrapping|test"
+no_hooks: false    # skip before/after/error hooks (read-only drift scan)
+no_stacks: false   # skip auto `terragrunt stack generate` for terragrunt.stack.hcl
 
 # Publish the report to a Terrakettle server after each scan (optional).
 # The token is per-project; prefer the $TERRAKETTLE_TOKEN env var in CI.

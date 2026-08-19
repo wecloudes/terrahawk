@@ -208,3 +208,6 @@ __marimo__/
 
 # CodeGraph index
 .codegraph/
+
+# uv lockfile — terrahawk is stdlib-only, nothing to lock
+uv.lock
