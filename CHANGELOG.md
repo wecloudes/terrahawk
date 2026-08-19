@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-19
+
+### Added
+
+- **Terragrunt stack drift scanning** — explicit stacks (`terragrunt.stack.hcl`) are now first-class. Before discovery, Terrahawk runs `terragrunt stack generate` in every stack root (`generate_stacks()` in `discovery.py`) so the materialised `.terragrunt-stack/` units are discovered, planned, and drift-reported like any other unit. Auto-detected (no stack files = no-op); disable with `--no-stacks` (or `no_stacks: true` in `.terrahawk.yml`). Generated trees are cleaned up after the scan, but only when this run generated them. Requires Terragrunt 1.x.
+- **Stack unit markers** — stack-generated units carry `isStack`, `stackName`, and a `displayUnit` (with the `.terragrunt-stack/` segment collapsed out). The HTML report shows a blue `▤ stack · <name>` badge and a clean path; the TUI shows an `S` indicator in the list plus a `Stack:` line in the detail view. Environment/subscription grouping is derived from the clean path, so the generated marker no longer pollutes it.
+- **Units-in-stack diagrams** — one Mermaid graph per stack (member units as status-coloured nodes, intra-stack `dependency → dependent` edges from the discovery DAG), built by `build_stack_graphs()` and written to `_data.js` as `window.TERRAHAWK_STACKS`. The report renders a "▤ Stacks" chip bar above the unit list; clicking a chip opens the graph in the shared pan/zoom Mermaid modal.
+
+### Changed
+
+- **Bumped pinned Terragrunt `1.1.1 → 1.1.3`**. Brings a provider-cache download hardening (secret URL segment prevents local credential leakage), `--filter` negation fixes (used by `--affected`), the `iam_role` self-assumption regression fix, per-unit `feature` flag defaults, and a 7–10× faster `find_in_parent_folders()`.
+
 ## [1.4.0] - 2026-07-21
 
 ### Added
