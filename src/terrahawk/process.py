@@ -42,6 +42,66 @@ def _classify_status(exit_code, plan_output):
     return status, diff, summary, error
 
 
+# Ordered (label, needles) pairs — first match wins, so order matters.
+# Matched case-insensitively against the unit's error/stderr text.
+_ERROR_CLASS_RULES = [
+    ("auth", (
+        "credentials", "access denied", "accessdenied", "expired token",
+        "invalidclienttoken", "no valid credential",
+        "unable to locate credentials", "signature", "unauthorized",
+    )),
+    ("init", (
+        "required plugins are not installed", "failed to download module",
+        "unable to find remote state", "error acquiring the state lock",
+        "failed to install provider", "could not download module",
+    )),
+    ("config", (
+        "unknown variable", "reference to undeclared", "unsupported attribute",
+        "invalid index", "error decoding", "no value for required variable",
+        "invalid attribute combination", "unsupported argument",
+        "error in function call", "parenotfound", "could not find",
+    )),
+]
+
+
+def _classify_error(status, error_text):
+    """Classify a failed unit into a coarse error taxonomy string.
+
+    Returns one of: timeout, auth, init, dependency, config, plan, other.
+    Non-error/non-timeout units return "". Matching is case-insensitive and
+    order-sensitive (first rule that matches wins).
+    """
+    if status not in ("error", "timeout"):
+        return ""
+
+    text = (error_text or "").lower()
+
+    # timeout: by status or by text
+    if status == "timeout" or "timed out" in text or "timeout" in text:
+        return "timeout"
+
+    # auth / init (before dependency/config so their needles take precedence)
+    for label, needles in _ERROR_CLASS_RULES[:2]:
+        if any(n in text for n in needles):
+            return label
+
+    # dependency: several distinct signals
+    if ("cannot resolve dependency" in text or "has no output" in text
+            or "dependency." in text
+            or ("outputs." in text and "dependency" in text)):
+        return "dependency"
+
+    # config
+    for _label, needles in _ERROR_CLASS_RULES[2:]:
+        if any(n in text for n in needles):
+            return "config"
+
+    # any remaining error
+    if status == "error":
+        return "plan"
+
+    return "other"
+
 
 def _process_tags(raw, args):
     """Extract resource tags and default_tags."""
@@ -512,6 +572,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
     plan_output = re.sub(r"^\d{2}:\d{2}:\d{2}\.\d+ STDOUT terraform: ?", "", plan_output, flags=re.MULTILINE)
 
     status, diff, summary, error = _classify_status(exit_code, plan_output)
+    error_class = _classify_error(status, error)
 
     # Parse plan resources (for drift units, populate structured change list).
     # Text parse first (best diff bodies); JSON plan as fallback when the
@@ -540,6 +601,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
         "displayUnit": display_path, "isStack": is_stack, "stackName": stack_name,
         "environment": env, "subscription": sub, "region": reg, "application": app,
         "summary": summary, "diff": diff, "error": error,
+        "errorClass": error_class,
         "planResources": plan_resources,
         "planDiagram": plan_diagram,
         "tags": tags if args.tags else None,

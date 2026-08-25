@@ -38,6 +38,12 @@ def generate_report(results, html_report, report_date, versions, args, stack_gra
         "window.TERRAHAWK_STACKS=" + json.dumps(stack_graphs or [], ensure_ascii=False) + ";\n"
     )
 
+    # Diagram runtime delivery mode: "inline" (default; self-contained but
+    # bloats every report by ~3.5MB) or "sidecar" (write mermaid.min.js once
+    # next to the report and reference it relatively). Default defensively so
+    # older callers that don't set the attribute keep the inline behavior.
+    diagram_assets = getattr(args, "diagram_assets", "inline")
+
     # Generate the HTML referencing the data file
     template = get_html_template()
     template = template.replace("%%DATA_FILE%%", data_js_name)
@@ -45,4 +51,46 @@ def generate_report(results, html_report, report_date, versions, args, stack_gra
     template = template.replace("%%HAS_DIAGRAMS%%", "true" if args.diagrams else "false")
     template = template.replace("%%HAS_TAGS%%", "true" if args.tags else "false")
     template = template.replace("%%VERSIONS%%", json.dumps(versions))
+    # Resolve the Mermaid runtime last, after every other placeholder is
+    # resolved, so the minified library body (which may itself contain '%%'
+    # sequences) can never clobber a template token.
+    template = template.replace(
+        "%%MERMAID_SCRIPT%%",
+        get_mermaid_script(mode=diagram_assets, output_dir=html_path.parent),
+    )
     html_path.write_text(template)
+
+
+def get_mermaid_script(mode="inline", output_dir=None):
+    """Return the ``<script>`` element that provides the Mermaid runtime.
+
+    Prefers the vendored copy bundled with the package (and baked into the
+    Docker images), producing a self-contained, air-gapped report. Falls back
+    to the public CDN only when the vendored asset is unavailable.
+
+    Two delivery modes are supported:
+
+    - ``"inline"`` (default): the minified library body is embedded directly in
+      a ``<script>`` element. Fully self-contained, but adds ~3.5MB to every
+      report.
+    - ``"sidecar"``: the vendored ``mermaid.min.js`` is written once into
+      ``output_dir`` (deduped across reports sharing that directory) and
+      referenced with a relative ``<script src>``. Still fully offline /
+      air-gapped because the file travels with the report, exactly like the
+      ``_data.js`` sidecar.
+    """
+    vendor_js = Path(__file__).parent / "templates" / "vendor" / "mermaid.min.js"
+    if not vendor_js.exists():
+        # No vendored asset: fall back to the public CDN regardless of mode.
+        return '<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>'
+    if mode == "sidecar":
+        target_dir = Path(output_dir) if output_dir is not None else vendor_js.parent
+        sidecar = target_dir / "mermaid.min.js"
+        # Dedupe: only copy if a sidecar isn't already present in this dir.
+        if not sidecar.exists():
+            sidecar.write_bytes(vendor_js.read_bytes())
+        return '<script src="mermaid.min.js"></script>'
+    # Inline (default). Escape any literal ``</script>`` so the inlined library
+    # body cannot terminate the surrounding <script> element prematurely.
+    js = vendor_js.read_text().replace("</script>", "<\\/script>")
+    return "<script>\n" + js + "\n</script>"

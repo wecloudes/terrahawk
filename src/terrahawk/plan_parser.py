@@ -105,6 +105,34 @@ def _mask_sensitive(value, sensitive):
     return value
 
 
+_SECRET_KEY_RE = re.compile(
+    r"password|passwd|secret|token|private_key|access_key|secret_key|"
+    r"client_secret|api[_-]?key|credential|passphrase",
+    re.IGNORECASE,
+)
+
+
+def _redact_by_keyname(obj):
+    """Redact string leaf values whose key name strongly implies a secret.
+
+    Heuristic backstop for state/outputs that lack provider `sensitive`
+    markers: recursively walks dicts/lists and replaces a string value with
+    "(redacted)" when its KEY matches a credential-like pattern. Keys and
+    non-string values are left untouched (no structural changes).
+    """
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(v, str) and isinstance(k, str) and _SECRET_KEY_RE.search(k):
+                out[k] = "(redacted)"
+            else:
+                out[k] = _redact_by_keyname(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_by_keyname(v) for v in obj]
+    return obj
+
+
 def parse_plan_resources_json(plan_json):
     """Build the same {address, type, action, body} entries from plan JSON.
 
@@ -119,8 +147,10 @@ def parse_plan_resources_json(plan_json):
         action = _JSON_ACTION_MAP.get(actions)
         if action is None:  # no-op or unknown
             continue
-        before = _mask_sensitive(change.get("before"), change.get("before_sensitive", False))
-        after = _mask_sensitive(change.get("after"), change.get("after_sensitive", False))
+        before = _redact_by_keyname(
+            _mask_sensitive(change.get("before"), change.get("before_sensitive", False)))
+        after = _redact_by_keyname(
+            _mask_sensitive(change.get("after"), change.get("after_sensitive", False)))
         body_parts = [f"# {rc.get('address', '?')} ({action})"]
         if before is not None:
             body_parts.append("before: " + json.dumps(before, indent=2, default=str))

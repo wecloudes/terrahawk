@@ -81,7 +81,8 @@ After `terragrunt plan`, the worker (`worker.py`) collects additional data from 
 | Resource count | `terraform show -json` (recursive module count) | Resource count badge |
 | Outputs | `terraform output -json` | Outputs table in module info |
 | Module source | `source = "..."` in unit's `terragrunt.hcl` | Module source display |
-| Architecture diagram | Built from `plan_json` + `state_json` (if `--diagrams`) | Mermaid diagram |
+| Architecture diagram | Built from `plan_json` + `state_json` (always generated; `--diagrams`/`--no-diagrams`, default on, only toggles report visibility) | Mermaid diagram |
+| Error class | `_classify_error(status, error)` in `process.py` — regex over the error text | `errorClass` entry field (`config`/`auth`/`init`/`dependency`/`plan`/`timeout`/`other`, `""` when not failed) → per-class error breakdown chips in the HTML report |
 | Plan JSON | `terraform show -json <planfile>` (captured on exit 0 AND 2) | Structured `resource_changes` (fallback when text parse fails) + `resource_drift` |
 | Out-of-band drift | `plan_json.resource_drift` | `driftedResources` entry field → "⚠ N ext" badge (HTML), "Changed Outside Terraform" section (TUI). Surfaces even on clean plans |
 | Unit duration | `time.monotonic()` around plan + collection | `duration` field, console `(Ns)` suffix |
@@ -159,11 +160,15 @@ docker build --build-arg CLOUD=azure -t terrahawk:azure .
 docker build --build-arg CLOUD=gcp   -t terrahawk:gcp   .
 
 # Run via Docker (example: AWS)
+# Run as your host uid (see "Non-root uid & credential mounts" below) so the
+# container can read your mode-600 ~/.aws files; HOME=/tmp because that uid has
+# no home entry, and creds are mounted under /tmp accordingly.
 docker run --rm \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$PWD":/workspace \
-  -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-  -v "$HOME/.aws":/home/nonroot/.aws \
-  -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+  -v "$HOME/.ssh":/tmp/.ssh:ro \
+  -v "$HOME/.aws":/tmp/.aws \
+  -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
   terrahawk:aws --root-dir /workspace
 ```
 
@@ -245,30 +250,34 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 5. Setup output dirs and paths
 6. detect_config_dir → find terragrunt root
 6b. Generate explicit stacks (terragrunt.stack.hcl → .terragrunt-stack) unless --no-stacks
-7. Discover units (rglob terragrunt.hcl)
+7. Discover units (rglob terragrunt.hcl); the repo-root "." unit is filtered out
 7b. Apply --unit filter (if --unit)
 8. Apply incremental filter (if --incremental)
 9. Query state ages (Azure Blob / AWS S3 / GCS)
 10. Extract root provider template
-11. Build DAG waves (if --dag)
+11. Build DAG waves (if --dag; when the graph has no cross-unit edges, fall back to flat parallelism)
 12. Execute plans (ThreadPoolExecutor, wave-by-wave or all-at-once)
-13. Process results (plan parsing, diagrams, tags, etc.)
+13. Process results (plan parsing, diagrams, tags, error classification, etc.)
 14. Merge incremental results from previous report
 15. Write JSON + manifest + HTML report
 16. Cleanup tmp dir, restore .terraform.lock.hcl files, remove generated .terragrunt-stack trees
+17. Return exit code per --fail-on (0, or 2 on findings); propagated by both entrypoints
 ```
 
 ### HTML Report Template
 
-The report at `src/terrahawk/templates/report.html` has all CSS and JavaScript inline. External dependencies: the Mermaid CDN for diagram rendering and a companion `_data.js` file for the report data.
+The report at `src/terrahawk/templates/report.html` has all CSS and JavaScript inline. The Mermaid runtime is vendored at `src/terrahawk/templates/vendor/mermaid.min.js` (ships in the pip package via `package-data` and in the Docker images via `COPY src/terrahawk/`) — there is **no CDN dependency**, so reports render diagrams fully offline / air-gapped. The only companion file is `_data.js`.
 
 The `_data.js` file is written by `report.py` and contains `window.TERRAHAWK_DATA=[...];` (plus `window.TERRAHAWK_STACKS=[...];` for per-stack diagrams). The HTML loads it via `<script src="%%DATA_FILE%%">`, which works from `file://`, S3, Azure Blob, GCS, or any static hosting (no CORS issues, no server required).
+
+Mermaid delivery is controlled by `--diagram-assets` (`get_mermaid_script()` in `report.py`): `inline` (default) embeds the vendored library in a `<script>` element (with `</script>` escaped) for a single self-contained file; `sidecar` writes `mermaid.min.js` once next to the report and references it relatively. If the vendored asset is ever missing, generation falls back to the public CDN.
 
 Placeholders injected via substitution:
 - `%%DATA_FILE%%` — filename of the companion `_data.js` file
 - `%%REPORT_DATE%%` — generation timestamp
 - `%%HAS_DIAGRAMS%%` / `%%HAS_TAGS%%` — feature flags
 - `%%VERSIONS%%` — tool versions JSON
+- `%%MERMAID_SCRIPT%%` — the Mermaid `<script>` element (inlined body or sidecar reference); resolved last so the minified library body cannot clobber other tokens
 
 When modifying the template, maintain:
 - Dark/light theme support (CSS custom properties)
@@ -307,6 +316,8 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 
 **Important**: The AWS CLI v2 installer bakes absolute paths into its launcher. Install with `--install-dir /usr/local/awscli --bin-dir /usr/local/bin` so paths match in the final image.
 
+**Non-root uid & credential mounts**: The final images run as `USER nonroot` (uid:gid `65532:65532`, `HOME=/home/nonroot`). Host credential files (`~/.aws`, `~/.azure`, `~/.config/gcloud`) are usually mode `600` owned by the host user, so uid 65532 **cannot read them** — the CLIs then fail with e.g. `The config profile (...) could not be found`. The portable fix documented in the run examples (Dockerfile header + README) is to run the container as the invoking user: `--user "$(id -u):$(id -g)" -e HOME=/tmp`, mounting creds under `/tmp` (`/tmp/.aws`, etc.). `HOME=/tmp` is needed because the host uid has no `/etc/passwd` home entry, and `/tmp` is world-writable so token-cache writes and generated report files (owned by the invoking user) succeed. Keep credential mounts read-write.
+
 ## Key Patterns
 
 **Zero runtime dependencies**: The Python code uses only the standard library. No pip packages are required at runtime. This keeps the package simple and the Docker image small.
@@ -333,18 +344,25 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 
 ## Version Management
 
-Version is defined in two places (keep synchronized):
+Version is defined in three places (keep synchronized):
 
 1. `src/terrahawk/__init__.py` — `__version__ = "X.Y.Z"`
 2. `pyproject.toml` — `version = "X.Y.Z"`
+3. `README.md` — the `docker pull wecloudes/terrahawk:aws-X.Y.Z` pin example
 
-The `--version` flag reads from `__init__.py`.
+The `--version` flag reads from `__init__.py`. Also add a `CHANGELOG.md` section for the release, and publish images with `scripts/build-push.sh X.Y.Z`.
 
 ## Testing Checklist
 
-Before submitting changes, verify:
+The project has a `pytest` suite under `tests/` and a CI workflow
+(`.github/workflows/ci.yml`) that runs it on Python 3.9 & 3.13 and builds the
+AWS image on every push/PR. Before submitting changes, verify:
 
 ```bash
+# Unit tests (hermetic — no network/docker/terragrunt)
+pip install -e '.[test]'
+pytest -q
+
 # Basic CLI
 python3 terrahawk.py --version
 python3 terrahawk.py --help

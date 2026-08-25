@@ -9,28 +9,35 @@
 #   docker build --build-arg CLOUD=azure -t terrahawk:azure .
 #   docker build --build-arg CLOUD=gcp   -t terrahawk:gcp   .
 #
+# Run as your host uid so the container can read your ~/.aws credential files
+# (mode 600, owned by you — unreadable to the image's uid 65532). --user has no
+# home entry, so point HOME at the world-writable /tmp and mount creds there.
+#
 # Run (AWS S3 backend):
 #   docker run --rm \
+#     --user "$(id -u):$(id -g)" -e HOME=/tmp \
 #     -v "$PWD":/workspace \
-#     -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-#     -v "$HOME/.aws":/home/nonroot/.aws \
-#     -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+#     -v "$HOME/.ssh":/tmp/.ssh:ro \
+#     -v "$HOME/.aws":/tmp/.aws \
+#     -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
 #     terrahawk:aws --root-dir /workspace
 #
 # Run (Azure Blob backend):
 #   docker run --rm \
+#     --user "$(id -u):$(id -g)" -e HOME=/tmp \
 #     -v "$PWD":/workspace \
-#     -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-#     -v "$HOME/.azure":/home/nonroot/.azure \
-#     -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+#     -v "$HOME/.ssh":/tmp/.ssh:ro \
+#     -v "$HOME/.azure":/tmp/.azure \
+#     -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
 #     terrahawk:azure --root-dir /workspace
 #
 # Run (GCP backend):
 #   docker run --rm \
+#     --user "$(id -u):$(id -g)" -e HOME=/tmp \
 #     -v "$PWD":/workspace \
-#     -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-#     -v "$HOME/.config/gcloud":/home/nonroot/.config/gcloud \
-#     -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+#     -v "$HOME/.ssh":/tmp/.ssh:ro \
+#     -v "$HOME/.config/gcloud":/tmp/.config/gcloud \
+#     -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
 #     terrahawk:gcp --root-dir /workspace
 
 ARG CLOUD=aws

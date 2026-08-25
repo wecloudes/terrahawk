@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package with test extras
+        run: pip install -e .[test]
+      - name: Run tests
+        run: pytest -q
+
+  docker-build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build image (aws variant)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: |
+            CLOUD=aws
+          push: false
+          load: true
+          tags: terrahawk:ci
+      - name: Scan image for CVEs (non-blocking)
+        continue-on-error: true
+        run: docker scout cves terrahawk:ci --only-severity critical,high

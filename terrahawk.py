@@ -14,7 +14,7 @@ if __name__ == "__main__":
     sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
     sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
     try:
-        main()
+        sys.exit(main())
     except KeyboardInterrupt:
         print("\n\u26a0\ufe0f  Interrupted.")
         sys.exit(130)

@@ -44,6 +44,11 @@ body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);line
 .cov-container h3{font-size:14px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
 .cov-bar{height:24px;border-radius:6px;overflow:hidden;display:flex;background:var(--border)}.cov-bar .seg-clean{background:var(--green)}.cov-bar .seg-drift{background:var(--yellow)}.cov-bar .seg-error{background:var(--red)}.cov-bar .seg-timeout{background:var(--orange)}
 .cov-legend{display:flex;gap:24px;margin-top:10px;font-size:13px;color:var(--text-muted)}
+.err-classes{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:24px}
+.err-classes .ec-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
+.err-chip{display:inline-flex;align-items:center;gap:6px;background:var(--red-bg);border:1px solid var(--red-border);color:var(--red);padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.err-chip .ec-count{font-size:11px;opacity:.85;background:var(--bg);padding:1px 7px;border-radius:8px}
+.err-chip.ec-timeout{background:var(--orange-bg);border-color:var(--orange-border);color:var(--orange)}
 .cov-legend span::before{content:'';display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .legend-clean::before{background:var(--green)!important}.legend-drift::before{background:var(--yellow)!important}.legend-error::before{background:var(--red)!important}.legend-timeout::before{background:var(--orange)!important}
 .filters{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;align-items:center;position:sticky;top:0;z-index:100;background:var(--bg);padding:12px 0;border-bottom:1px solid var(--border)}
@@ -162,6 +167,7 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 <div class="stats" id="stats"></div>
 <div class="cov-container"><h3>Unit Status</h3><div class="cov-bar" id="cov-bar"></div>
 <div class="cov-legend"><span class="legend-clean">Clean</span><span class="legend-drift">Drift</span><span class="legend-error">Error</span></div></div>
+<div id="err-classes"></div>
 <div class="filters">
 <div class="filter-group" id="sf"></div>
 <select class="filter-select" id="sub-filter"><option value="all">All subscriptions</option></select>
@@ -196,7 +202,10 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 <div class="modal-header"><h3 id="info-title"></h3><button class="modal-close" onclick="closeModal('info-modal')">&times;</button></div>
 <div class="modal-body" id="info-body"></div>
 </div></div>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<!-- Mermaid runtime. Inlined from the bundled vendor copy so the report is
+     fully self-contained and works air-gapped; falls back to CDN only if the
+     vendored asset is missing at report-generation time. -->
+%%MERMAID_SCRIPT%%
 <script>mermaid.initialize({startOnLoad:false,theme:'dark',maxTextSize:100000,flowchart:{useMaxWidth:false,htmlLabels:true,nodeSpacing:30,rankSpacing:50}});
 const DIAGRAM_STYLES_DARK=[
   'classDef addCls fill:#12261e,stroke:#3fb950,color:#3fb950',
@@ -286,8 +295,28 @@ function init(){
   if(HAS_DIAGRAMS)thtml+=`<button class="toggle-btn on" id="tog-diagrams" onclick="toggleView('diagrams')" title="Toggle architecture diagrams">\u{1f5fa}</button>`;
   if(HAS_TAGS)thtml+=`<button class="toggle-btn on" id="tog-tags" onclick="toggleView('tags')" title="Toggle resource tags">\u{1f3f7}</button>`;
   tg.innerHTML=thtml;
+  renderErrorClasses();
   renderStacksBar();
   render();
+}
+function renderErrorClasses(){
+  const el=document.getElementById('err-classes');if(!el)return;
+  const LABELS={config:'Config/HCL',auth:'Auth',init:'Init/State',dependency:'Dependency',plan:'Plan',timeout:'Timeout',other:'Other'};
+  const ORDER=['config','auth','init','dependency','plan','timeout','other'];
+  const counts={};
+  DATA.forEach(d=>{
+    if(d.status!=='error'&&d.status!=='timeout')return;
+    const ec=d.errorClass||'other';
+    counts[ec]=(counts[ec]||0)+1;
+  });
+  const total=Object.values(counts).reduce((a,b)=>a+b,0);
+  if(!total){el.className='';el.innerHTML='';return;}
+  el.className='err-classes';
+  let h='<span class="ec-label">✗ Errors by class</span>';
+  for(const k of ORDER){if(counts[k])h+=`<span class="err-chip${k==='timeout'?' ec-timeout':''}">${LABELS[k]}<span class="ec-count">${counts[k]}</span></span>`;}
+  // Any unexpected classes not covered by the known label set.
+  Object.keys(counts).forEach(k=>{if(!ORDER.includes(k))h+=`<span class="err-chip">${esc(k)}<span class="ec-count">${counts[k]}</span></span>`;});
+  el.innerHTML=h;
 }
 function toggleView(which){
   if(which==='diagrams'){showDiagrams=!showDiagrams;document.getElementById('tog-diagrams').classList.toggle('on',showDiagrams);}

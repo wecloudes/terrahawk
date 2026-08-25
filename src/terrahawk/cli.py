@@ -36,7 +36,10 @@ def _parse_args(repo_root):
                         help="Path to the repository root containing the terragrunt structure (default: current directory)")
     parser.add_argument("-p", "--parallelism", type=int, default=int(config.get("parallelism", 6)))
     parser.add_argument("-t", "--timeout", type=int, default=int(config.get("timeout", 300)))
-    parser.add_argument("--diagrams", action="store_true", default=config.get("diagrams") == "true")
+    parser.add_argument("--diagrams", action=argparse.BooleanOptionalAction,
+                        default=str(config.get("diagrams", "true")).lower() != "false",
+                        help="Embed interactive Mermaid architecture diagrams in the report "
+                             "(default: on; use --no-diagrams, or set diagrams=false in .terrahawk.yml, to disable)")
     parser.add_argument("--tags", action="store_true", default=config.get("tags") == "true")
     parser.add_argument("--incremental", action="store_true", default=config.get("incremental") == "true")
     parser.add_argument("--affected", nargs="?", const="main", default=config.get("affected") or None,
@@ -45,7 +48,21 @@ def _parse_args(repo_root):
                              "Uses terragrunt's --filter=[BASE...HEAD]; unaffected units are merged from the previous report. "
                              "Terragrunt >=1.0.7 also tracks local module sources / tfr:// registry as read files, "
                              "so edits to a local module correctly mark its consumers affected")
-    parser.add_argument("--dag", action="store_true", default=config.get("dag") == "true")
+    parser.add_argument("--dag", action=argparse.BooleanOptionalAction,
+                        default=str(config.get("dag", "true")).lower() != "false",
+                        help="Execute units in dependency-ordered topological waves "
+                             "(default: on; use --no-dag, or set dag=false in .terrahawk.yml, to disable)")
+    parser.add_argument("--fail-on", choices=["never", "drift", "error"],
+                        default=config.get("fail_on", "never"),
+                        help="Exit nonzero when the scan finds drift or errors, for CI gating. "
+                             "'drift' fails on any drift OR error; 'error' fails only on errors/timeouts. "
+                             "Default: never (always exit 0).")
+    parser.add_argument("--diagram-assets", choices=["inline", "sidecar"],
+                        default=config.get("diagram_assets", "inline"),
+                        help="How the Mermaid runtime is delivered in the report. "
+                             "'inline' embeds it in the HTML (self-contained, ~3.5MB per report); "
+                             "'sidecar' writes mermaid.min.js once beside the report and references it "
+                             "(smaller HTML, still offline/air-gapped). Default: inline.")
     parser.add_argument("-u", "--unit", type=str, default=None,
                         help="Scan only the unit whose relative path matches this value (e.g., 'production/westeurope/app-gw')")
     parser.add_argument("--exclude", type=str, default=config.get("exclude", ""))
@@ -474,7 +491,14 @@ def main():
     if args.dag and units:
         print("\U0001f517 Building dependency DAG...")
         waves = build_dag(units, native_deps)
-        print(f"  {len(waves)} execution waves from {len(units)} units")
+        # A single wave means no cross-unit dependency ordering exists; wave
+        # scheduling would only add pointless serialization, so fall through
+        # to the normal flat-parallel path.
+        if len(waves) <= 1:
+            print("  ℹ️  No cross-unit dependencies — using flat parallelism.")
+            waves = None
+        else:
+            print(f"  {len(waves)} execution waves from {len(units)} units")
 
     # Run plans
     raw_results = _execute_plans(units, waves, args, unit_timeouts, repo_root, tmp_dir)
@@ -507,3 +531,16 @@ def main():
 
     # Cleanup
     _cleanup(tmp_dir, repo_root, clean_stacks=generated_stacks)
+
+    # CI gating: exit code 2 signals "findings" (distinct from 1 = terrahawk
+    # internal failure). Controlled by --fail-on; default "never" exits 0.
+    drift = sum(1 for r in results if r["status"] == "drift")
+    errors = sum(1 for r in results if r["status"] == "error")
+    timeouts = sum(1 for r in results if r["status"] == "timeout")
+    if args.fail_on == "error" and (errors > 0 or timeouts > 0):
+        print(f"⚠️  --fail-on={args.fail_on}: exiting 2 (drift={drift}, error={errors + timeouts})")
+        return 2
+    elif args.fail_on == "drift" and (drift > 0 or errors > 0 or timeouts > 0):
+        print(f"⚠️  --fail-on={args.fail_on}: exiting 2 (drift={drift}, error={errors + timeouts})")
+        return 2
+    return 0

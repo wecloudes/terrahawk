@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-25
+
+### Added
+
+- **Error taxonomy (`errorClass`)** — every failed unit is now classified from its error text into one of `config`, `auth`, `init`, `dependency`, `plan`, `timeout`, or `other` (via `_classify_error()` in `process.py`), stored on each result as `errorClass`. The HTML report renders a compact chip row breaking errors down by class so failures can be triaged at a glance instead of being lumped into a single "error" bucket.
+- **`--fail-on never|drift|error`** — exit-code gating for CI. `error` exits non-zero (code `2`) on any error/timeout; `drift` exits `2` on any drift, error, or timeout; `never` (default) always exits `0`. Configurable via `fail_on` in `.terrahawk.yml`. Exit code `2` is reserved for "findings" so it is distinguishable from `1` (terrahawk internal failure). Both entrypoints (`terrahawk.py`, `python -m terrahawk`) now propagate `main()`'s return value.
+- **`--diagram-assets inline|sidecar`** — controls Mermaid delivery. `inline` (default) embeds the runtime in the HTML for a single self-contained file; `sidecar` writes `mermaid.min.js` once next to the report and references it relatively (much smaller HTML, still fully offline/air-gapped, deduped across reports in the same directory). Configurable via `diagram_assets` in `.terrahawk.yml`.
+- **Test suite & CI** — first `pytest` suite (`tests/`, 30 tests covering plan parsing, secret redaction, error classification, DAG wave ordering, and report generation) plus a GitHub Actions workflow (`.github/workflows/ci.yml`) running the tests on Python 3.9 & 3.13 and building the AWS Docker image (with a non-blocking Docker Scout scan).
+
+### Changed
+
+- **`--diagrams` and `--dag` now default to on.** Architecture diagrams are embedded and units execute in dependency-ordered topological waves out of the box. Opt out per-run with `--no-diagrams` / `--no-dag` (both accept the `--no-` prefix via `argparse.BooleanOptionalAction`), or persistently with `diagrams: false` / `dag: false` in `.terrahawk.yml`. An explicit `diagrams: true` / `dag: true` in config keeps working.
+- **Self-contained, air-gapped reports.** The Mermaid runtime is now vendored (`src/terrahawk/templates/vendor/mermaid.min.js`, v11.17.1) and inlined directly into the generated HTML instead of being loaded from `cdn.jsdelivr.net`. Reports render diagrams with no network access. The vendored asset ships in both the pip package (`package-data`) and the Docker images (`COPY src/terrahawk/`); generation falls back to the CDN only if the vendored file is missing.
+- **DAG flat-parallel fallback** — when the dependency graph has no cross-unit edges, wave scheduling is skipped and units run in flat parallelism, avoiding needless serialization now that `--dag` is on by default. Behavior is unchanged when real dependency ordering exists.
+- **The repository-root `terragrunt.hcl` is no longer scanned as a `.` unit.** It has no `region.hcl`/`env.hcl` above it and always errored; it is now filtered out at discovery so it stops polluting the report and error counts.
+
+### Security
+
+- **Key-name secret redaction backstop** — plan diffs now redact string values whose attribute name implies a secret (`password`, `secret`, `token`, `private_key`, `access_key`, `client_secret`, `api_key`, `credential`, `passphrase`, …) even when the provider did not flag them `sensitive`. This runs after the existing provider-sensitive masking as a defensive layer for state/outputs lacking sensitive markers.
+
+### Fixed
+
+- **Docker credential permissions** — documented and corrected the run examples so the container (which runs as non-root uid `65532`) can read host credential files (typically mode `600`): run with `--user "$(id -u):$(id -g)" -e HOME=/tmp` and mount credentials under `/tmp`. Previously the documented mounts failed with `The config profile (...) could not be found`.
+
 ## [1.5.0] - 2026-08-19
 
 ### Added

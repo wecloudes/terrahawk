@@ -84,6 +84,10 @@ def discover_units(config_dir, exclude_pattern="", tg_ver="", filter_expr=None):
     else:
         units, deps = _discover_rglob(config_dir), None
 
+    # Drop the repository root's own terragrunt.hcl (discovered as rel_path
+    # "." / ""): it has no region.hcl/env.hcl above it, so it always errors.
+    units = [(ud, rp) for ud, rp in units if rp not in (".", "")]
+
     if exclude_pattern:
         units = [(ud, rp) for ud, rp in units if not re.search(exclude_pattern, rp)]
 

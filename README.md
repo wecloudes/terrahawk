@@ -17,12 +17,14 @@ Designed to run on a daily schedule via CI/CD (GitHub Actions, GitLab CI, Azure 
 ## Features
 
 - **Drift Detection** — Runs `terragrunt plan -detailed-exitcode` on every unit. Diffs are rendered inline with color-coded syntax highlighting (additions, deletions, modifications). Units are classified as clean, drift, error, or timeout.
-- **Architecture Diagrams** (`--diagrams`) — Interactive [Mermaid](https://mermaid.js.org/) diagrams built from the Terraform plan and state, showing all resources with dependency arrows. Changed resources are color-coded by action. No external tools required.
+- **Architecture Diagrams** (on by default, `--no-diagrams` to disable) — Interactive [Mermaid](https://mermaid.js.org/) diagrams built from the Terraform plan and state, showing all resources with dependency arrows. Changed resources are color-coded by action. The Mermaid runtime is vendored and inlined into the report, so diagrams render fully offline / air-gapped — no CDN, no external tools required.
 - **Tag Extraction** (`--tags`) — Resource tags extracted from Terraform state via `terraform show -json`. Filter units by any tag key/value combination.
 - **Module Info** — Module source, required providers with version constraints, input variables with type definitions and defaults, and output values from state.
 - **State Age** — Queries the remote state backend (Azure Blob, AWS S3, GCS) for last-modified dates. Informational blue badges showing days since last apply.
 - **Incremental Mode** (`--incremental`) — Only re-scans units whose `terragrunt.hcl` changed since the last report. Unchanged units are merged from the previous run.
-- **Dependency-Aware Execution** (`--dag`) — Parses `dependency` blocks to build a DAG and executes units in topological waves, ensuring correct plan order.
+- **Dependency-Aware Execution** (on by default, `--no-dag` to disable) — Parses `dependency` blocks to build a DAG and executes units in topological waves, ensuring correct plan order. When there are no cross-unit dependencies it falls back to flat parallelism automatically.
+- **Error Taxonomy** — Failed units are classified (`config`, `auth`, `init`, `dependency`, `plan`, `timeout`) and the report shows a per-class breakdown, so failures are triageable at a glance instead of one undifferentiated "error" bucket.
+- **CI Gating** (`--fail-on drift|error`) — Exit non-zero (code `2`) when the scan finds drift or errors, so a scheduled scan can fail a pipeline. Default `never` (always exit `0`).
 - **Terragrunt Stacks** (auto, `--no-stacks` to disable) — Explicit stacks (`terragrunt.stack.hcl`) are auto-materialised via `terragrunt stack generate` before discovery, so their generated units are drift-scanned like any other unit. Stack units get a `▤ stack · <name>` badge, and each stack renders a **units-in-stack** Mermaid diagram (members coloured by status, intra-stack dependency edges) from a "▤ Stacks" chip bar. Generated trees are cleaned up afterwards. Requires Terragrunt 1.x.
 - **Dark/Light Theme** — Toggle in the report header, persisted via localStorage.
 - **CSV Export** — Export filtered results directly from the report.
@@ -62,8 +64,11 @@ Python 3.9 or later.
 # From the root of your Terragrunt repository:
 python3 terrahawk.py
 
-# With all optional features:
-python3 terrahawk.py --diagrams --tags --dag
+# Diagrams and DAG execution are on by default; add tag extraction:
+python3 terrahawk.py --tags
+
+# Gate a CI run: exit non-zero if any drift or errors are found:
+python3 terrahawk.py --fail-on drift
 
 # Scan a single unit:
 python3 terrahawk.py --unit production/westeurope/app-gateway
@@ -101,7 +106,7 @@ docker pull wecloudes/terrahawk:azure
 docker pull wecloudes/terrahawk:gcp
 
 # Or pin a release:
-docker pull wecloudes/terrahawk:aws-1.5.0
+docker pull wecloudes/terrahawk:aws-1.6.0
 ```
 
 Or build locally:
@@ -115,32 +120,56 @@ docker build --build-arg CLOUD=gcp   -t terrahawk:gcp   .
 ```bash
 # Run (AWS S3 backend):
 docker run --rm \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$PWD":/workspace \
-  -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-  -v "$HOME/.aws":/home/nonroot/.aws \
-  -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+  -v "$HOME/.ssh":/tmp/.ssh:ro \
+  -v "$HOME/.aws":/tmp/.aws \
+  -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
   terrahawk:aws --root-dir /workspace --diagrams --tags
 ```
 
 ```bash
 # Run (Azure Blob backend):
 docker run --rm \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$PWD":/workspace \
-  -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-  -v "$HOME/.azure":/home/nonroot/.azure \
-  -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+  -v "$HOME/.ssh":/tmp/.ssh:ro \
+  -v "$HOME/.azure":/tmp/.azure \
+  -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
   terrahawk:azure --root-dir /workspace
 ```
 
 ```bash
 # Run (GCS backend):
 docker run --rm \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$PWD":/workspace \
-  -v "$HOME/.ssh":/home/nonroot/.ssh:ro \
-  -v "$HOME/.config/gcloud":/home/nonroot/.config/gcloud \
-  -v "$HOME/.gitconfig":/home/nonroot/.gitconfig:ro \
+  -v "$HOME/.ssh":/tmp/.ssh:ro \
+  -v "$HOME/.config/gcloud":/tmp/.config/gcloud \
+  -v "$HOME/.gitconfig":/tmp/.gitconfig:ro \
   terrahawk:gcp --root-dir /workspace
 ```
+
+### Credentials & file permissions (Docker)
+
+The image runs as a non-root user (uid:gid `65532:65532`). Your host credential
+files (`~/.aws`, `~/.azure`, `~/.config/gcloud`) are typically mode `600` and
+owned by *your* host user, so uid 65532 inside the container cannot read them —
+terrahawk then fails with errors like `The config profile (...) could not be found`.
+
+The fix (already shown in the examples above) is to run the container **as your
+host user** so it can read the mounted files:
+
+```bash
+--user "$(id -u):$(id -g)" -e HOME=/tmp
+```
+
+Because that uid has no entry in the image's `/etc/passwd`, point `HOME` at the
+world-writable `/tmp` and mount your credential/config files under `/tmp`
+(`/tmp/.aws`, `/tmp/.azure`, `/tmp/.config/gcloud`, `/tmp/.ssh`, `/tmp/.gitconfig`).
+This also makes the generated report files in `terrahawk_results/` owned by you
+instead of uid 65532. Keep the credential mounts read-write (not `:ro`) — some
+CLIs write token-cache files into them.
 
 ---
 
@@ -159,15 +188,17 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `-u, --unit` | `None` | Scan only the unit whose relative path matches this value |
 | `-p, --parallelism` | `6` | Maximum concurrent `terragrunt plan` executions |
 | `-t, --timeout` | `300` | Timeout in seconds per unit |
-| `--diagrams` | `false` | Enable architecture diagrams from plan/state |
+| `--diagrams` / `--no-diagrams` | `true` | Embed architecture diagrams from plan/state (on by default; Mermaid is inlined, no network needed) |
 | `--tags` | `false` | Extract resource tags from Terraform state |
 | `--incremental` | `false` | Only re-scan changed units since the last report |
-| `--dag` | `false` | Execute units in dependency order (topological waves) |
+| `--dag` / `--no-dag` | `true` | Execute units in dependency order (topological waves); on by default |
 | `--exclude` | `""` | Regex pattern to exclude unit paths |
 | `--no-hooks` | `false` | Skip `before_hook`/`after_hook`/`error_hook` for a pure read-only drift scan (Terragrunt experimental `optional-hooks`, requires Terragrunt ≥1.0.8) |
 | `--no-stacks` | `false` | Skip `terragrunt stack generate` for `terragrunt.stack.hcl` files. By default stacks are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x) |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
+| `--fail-on` | `never` | Exit with a nonzero status for CI gating: `never`, `drift` (exit nonzero on any drift), or `error` (exit nonzero only on unit errors) |
+| `--diagram-assets` | `inline` | Where diagram data lives: `inline` embeds Mermaid in the HTML, `sidecar` writes it once beside the report |
 | `--push-url` | `None` | Publish the report to a [Terrakettle](../terrakettle) server after the scan |
 | `--push-token` | `$TERRAKETTLE_TOKEN` | Per-project Terrakettle push token |
 | `--version` | | Print version and exit |
@@ -254,10 +285,12 @@ Terrahawk supports a `.terrahawk.yml` file in the repository root. Values set he
 
 parallelism: 10
 timeout: 300
-diagrams: true
+diagrams: true     # embed architecture diagrams (default: true; set false to disable)
 tags: true
 incremental: false
-dag: false
+dag: true          # dependency-ordered execution (default: true; set false to disable)
+fail_on: never     # never | drift | error — exit code 2 on findings, for CI gating
+diagram_assets: inline   # inline | sidecar — embed Mermaid in the HTML, or write it once beside the report
 exclude: "bootstrapping|test"
 no_hooks: false    # skip before/after/error hooks (read-only drift scan)
 no_stacks: false   # skip auto `terragrunt stack generate` for terragrunt.stack.hcl

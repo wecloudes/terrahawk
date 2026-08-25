@@ -3,7 +3,8 @@
 # build-push.sh — build the per-cloud Terrahawk images, scan them with
 # Docker Scout, and push only if the scan gate passes.
 #
-# This is the manual release pipeline (there is no CI). It exists so a
+# This is the manual release/publish pipeline. CI (.github/workflows/ci.yml)
+# runs tests and a build on every push, but publishing images is manual. It exists so a
 # regressed image can't be published silently, and so periodic rebuilds
 # (which absorb upstream base/tool CVE patches) are one command.
 #
