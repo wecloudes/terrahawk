@@ -16,19 +16,29 @@ _PLAN_ACTION_RE = re.compile(
 _PLAN_DECL_RE = re.compile(r'^\s*[-+~/<=\s]+(?:resource|data)\s+"([^"]+)"')
 
 
+_HEREDOC_OPEN_RE = re.compile(r'<<-?\s*([A-Za-z_]\w*)\s*$')
+
+
 def _count_braces(line):
-    """Count net brace depth change on a line, ignoring braces inside strings."""
+    """Count net brace depth change on a line, ignoring braces inside strings
+    and `#` / `//` line comments."""
     depth = 0
     in_str = False
     i = 0
-    while i < len(line):
+    n = len(line)
+    while i < n:
         c = line[i]
-        if c == "\\" and in_str and i + 1 < len(line):
+        if c == "\\" and in_str and i + 1 < n:
             i += 2
             continue
         if c == '"':
             in_str = not in_str
         elif not in_str:
+            # A line comment starts here — the rest of the line is not code.
+            if c == "#":
+                break
+            if c == "/" and i + 1 < n and line[i + 1] == "/":
+                break
             if c == "{":
                 depth += 1
             elif c == "}":
@@ -62,13 +72,26 @@ def parse_plan_resources(plan_output):
         if decl_idx is None:
             continue
         rtype = _PLAN_DECL_RE.match(lines[decl_idx]).group(1)
-        # Walk forward, tracking brace depth until the block closes.
+        # Walk forward, tracking brace depth until the block closes. Skip brace
+        # counting inside heredoc bodies (`<<-EOT ... EOT`), whose free-text
+        # content can contain unbalanced braces that would corrupt the depth.
         body_lines = list(lines[idx:decl_idx + 1])
         depth = _count_braces(lines[decl_idx])
         j = decl_idx + 1
+        heredoc_tag = None
         while j < len(lines) and depth > 0:
-            body_lines.append(lines[j])
-            depth += _count_braces(lines[j])
+            line = lines[j]
+            body_lines.append(line)
+            if heredoc_tag is not None:
+                if line.strip() == heredoc_tag:
+                    heredoc_tag = None
+            else:
+                hm = _HEREDOC_OPEN_RE.search(line)
+                if hm:
+                    heredoc_tag = hm.group(1)
+                    depth += _count_braces(line[:hm.start()])
+                else:
+                    depth += _count_braces(line)
             j += 1
         resources.append({
             "address": addr,

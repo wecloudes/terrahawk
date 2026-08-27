@@ -45,6 +45,59 @@ class TestMaskSensitive:
         assert plan_parser._mask_sensitive(value, True) == "(sensitive value)"
 
 
+class TestCountBraces:
+    def test_balanced_and_net(self):
+        assert plan_parser._count_braces("{ }") == 0
+        assert plan_parser._count_braces("resource {") == 1
+        assert plan_parser._count_braces("}") == -1
+
+    def test_braces_in_strings_ignored(self):
+        assert plan_parser._count_braces('x = "a{b}c"') == 0
+        assert plan_parser._count_braces('x = "{" ') == 0
+
+    def test_hash_comment_ignored(self):
+        # a '#' comment with an unbalanced brace must not affect depth
+        assert plan_parser._count_braces("foo = 1  # note }") == 0
+        assert plan_parser._count_braces("# { { {") == 0
+
+    def test_slash_comment_ignored(self):
+        assert plan_parser._count_braces("foo = 1  // }}}") == 0
+
+
+class TestParsePlanResourcesBraceWalk:
+    def test_heredoc_body_braces_do_not_truncate_block(self):
+        plan = "\n".join([
+            "  # aws_instance.web will be updated in-place",
+            '  ~ resource "aws_instance" "web" {',
+            "      ~ user_data = <<-EOT",
+            "            #!/bin/bash",
+            "            echo { unbalanced brace",
+            "        EOT",
+            '      ~ ami       = "old" -> "new"',
+            "    }",
+        ])
+        res = plan_parser.parse_plan_resources(plan)
+        assert len(res) == 1
+        r = res[0]
+        assert r["address"] == "aws_instance.web"
+        assert r["action"] == "update"
+        # the block must capture through its real closing brace, not stop early
+        assert 'ami       = "old" -> "new"' in r["body"]
+        assert r["body"].rstrip().endswith("}")
+
+    def test_inline_comment_brace_does_not_leak_block(self):
+        plan = "\n".join([
+            "  # aws_s3_bucket.b will be created",
+            '  + resource "aws_s3_bucket" "b" {',
+            '      + bucket = "x"  # trailing } brace in comment',
+            "    }",
+            "extra line that must not be swallowed",
+        ])
+        res = plan_parser.parse_plan_resources(plan)
+        assert len(res) == 1
+        assert "extra line that must not be swallowed" not in res[0]["body"]
+
+
 class TestRedactByKeyname:
     """Guarded: helper may be added by parallel work."""
 

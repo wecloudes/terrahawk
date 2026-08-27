@@ -321,18 +321,17 @@ def _generate_plan_diagram(raw, plan_resources):
     type_map = {r["address"]: r["type"] for r in plan_resources}
 
     # From current state (all existing resources)
-    def _extract_state_resources(mod, prefix=""):
-        """Recursively extract resource addresses and types from state JSON."""
+    def _extract_state_resources(mod):
+        """Recursively extract resource addresses and types from state JSON.
+        Each resource's `address` is already fully qualified (module path
+        included), so no prefix threading is needed."""
         for res in mod.get("resources", []):
             addr = res.get("address", "")
-            if prefix:
-                addr = f"{prefix}.{addr}"
             rtype = res.get("type", "")
             if addr not in type_map:
                 type_map[addr] = rtype
         for child in mod.get("child_modules", []):
-            child_addr = child.get("address", "")
-            _extract_state_resources(child, "")  # child already has full address
+            _extract_state_resources(child)
 
     if state_json:
         root_mod = state_json.get("values", {}).get("root_module", {})
@@ -508,6 +507,62 @@ def _generate_plan_diagram(raw, plan_resources):
     return "\n".join(lines)
 
 
+def _build_plan_resources(status, plan_output, plan_json):
+    """Resolve the structured change list, preferring plan JSON as the source
+    of truth.
+
+    The JSON plan (`terraform show -json <planfile>`) gives a structurally
+    exact set of changes — address, type, and action — with none of the
+    fragility of walking `terraform plan` text (wrapped lines, heredocs, and
+    comments that can corrupt the brace-depth scan). We therefore treat JSON
+    as authoritative for *which* resources changed, and graft on the nicer
+    human-readable `body` (terraform's native +/-/~ diff) from the text parse
+    whenever we have one for the same address.
+
+    Falls back to text-only when no plan JSON was captured (older terraform,
+    or a capture failure), preserving the previous behaviour.
+    """
+    text_res = plan_parser.parse_plan_resources(plan_output) if status == "drift" else []
+    json_res = plan_parser.parse_plan_resources_json(plan_json) if plan_json else []
+    if not json_res:
+        return text_res
+    text_body = {r["address"]: r["body"] for r in text_res}
+    for r in json_res:
+        if r["address"] in text_body:
+            r["body"] = text_body[r["address"]]
+    return json_res
+
+
+_ACTION_COUNT_BUCKETS = {
+    "create":  ("add",),
+    "update":  ("change",),
+    "delete":  ("destroy",),
+    "replace": ("add", "destroy"),
+}
+
+
+def _plan_summary(text_summary, plan_resources):
+    """Pick the plan summary line, JSON-derived when the text line is missing.
+
+    Terraform's `Plan: N to add, M to change, K to destroy.` line is stable and
+    preferred when present. When the text parse can't find it (wrapped output,
+    format drift) but we have a structured change list, synthesize the same
+    line from the resource actions so the report still shows real counts. A
+    replace counts as both an add and a destroy, matching terraform's own tally.
+    """
+    if text_summary:
+        return text_summary
+    if not plan_resources:
+        return ""
+    counts = {"add": 0, "change": 0, "destroy": 0}
+    for r in plan_resources:
+        for bucket in _ACTION_COUNT_BUCKETS.get(r.get("action", ""), ()):
+            counts[bucket] += 1
+    if not any(counts.values()):
+        return ""
+    return f"Plan: {counts['add']} to add, {counts['change']} to change, {counts['destroy']} to destroy."
+
+
 def _process_module_source(raw):
     """Extract module source: rendered config first, terragrunt.hcl regex fallback."""
     src = ((raw.get("render_json") or {}).get("terraform") or {}).get("source")
@@ -574,14 +629,12 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
     status, diff, summary, error = _classify_status(exit_code, plan_output)
     error_class = _classify_error(status, error)
 
-    # Parse plan resources (for drift units, populate structured change list).
-    # Text parse first (best diff bodies); JSON plan as fallback when the
-    # text parser comes up empty.
-    plan_resources = []
-    if status == "drift":
-        plan_resources = plan_parser.parse_plan_resources(plan_output)
-        if not plan_resources and raw.get("plan_json"):
-            plan_resources = plan_parser.parse_plan_resources_json(raw["plan_json"])
+    # Structured change list. JSON plan is authoritative for the set of
+    # changes (immune to text-parse fragility); the human-readable text body
+    # is grafted on per resource. Falls back to text-only without plan JSON.
+    plan_resources = _build_plan_resources(status, plan_output, raw.get("plan_json"))
+    # Prefer terraform's own `Plan:` line; synthesize from counts if absent.
+    summary = _plan_summary(summary, plan_resources)
 
     # Out-of-band drift: resources changed outside Terraform. Present even on
     # clean plans (exit 0), where the text output never mentions them.

@@ -43,6 +43,37 @@ def find_cache_dir(unit_dir):
     return best[1]
 
 
+def _resolve_timeout(unit_dir, default_timeout, unit_timeouts):
+    """Pick a unit's plan timeout: the first `unit_timeouts` pattern that is a
+    substring of `unit_dir` wins, otherwise the default."""
+    for pattern, t in unit_timeouts.items():
+        if pattern in unit_dir:
+            return t
+    return default_timeout
+
+
+def _build_plan_args(unit_dir, plan_file, no_hooks=False):
+    """Assemble the `terragrunt plan` argument list for one unit.
+
+    `-detailed-exitcode` makes exit 2 mean drift; `-lock=false` and
+    `--dependency-fetch-output-from-state` keep the scan read-only and fast.
+    `no_hooks` prepends the experimental flags that skip before/after/error
+    hooks (requires Terragrunt >=1.0.8 with the experiment enabled).
+    """
+    plan_args = [
+        "plan", "-detailed-exitcode", "-input=false",
+        "-lock=false", "-no-color",
+        f"-out={plan_file}",
+        f"--working-dir={unit_dir}",
+        "--non-interactive",
+        "--dependency-fetch-output-from-state",
+    ]
+    if no_hooks:
+        plan_args.insert(1, "--experiment=optional-hooks")
+        plan_args.insert(2, "--no-hooks")
+    return plan_args
+
+
 def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_dir, idx):
     """Run terragrunt plan and optional tools for a single unit."""
     result = {
@@ -52,11 +83,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     t_start = time.monotonic()
 
     # Determine per-unit timeout
-    my_timeout = timeout
-    for pattern, t in unit_timeouts.items():
-        if pattern in unit_dir:
-            my_timeout = t
-            break
+    my_timeout = _resolve_timeout(unit_dir, timeout, unit_timeouts)
 
     # Run terragrunt plan
     exit_code = 0
@@ -69,22 +96,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     tg_ver = getattr(args, "terragrunt_version", "")
 
     plan_file = os.path.join(tmp_dir, f"plan_{idx}.tfplan")
-    plan_args = [
-        "plan", "-detailed-exitcode", "-input=false",
-        "-lock=false", "-no-color",
-        f"-out={plan_file}",
-        f"--working-dir={unit_dir}",
-        "--non-interactive",
-        # Read dependency outputs directly from remote state instead of
-        # spawning `terraform output` in each dependency — big speedup on
-        # deep DAGs, and safe for a read-only scanner.
-        "--dependency-fetch-output-from-state",
-    ]
-    # Optional: skip before/after/error hooks for a pure read-only drift scan
-    # (Terragrunt experimental "optional-hooks", needs the experiment enabled).
-    if getattr(args, "no_hooks", False):
-        plan_args.insert(1, "--experiment=optional-hooks")
-        plan_args.insert(2, "--no-hooks")
+    plan_args = _build_plan_args(unit_dir, plan_file, getattr(args, "no_hooks", False))
     plan_cmd = mise_cmd("terragrunt", tg_ver, plan_args)
 
     retryable_errors = ["Failed to query available provider packages",
@@ -101,9 +113,11 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         exit_code = r.returncode
         plan_output = r.stdout + r.stderr
 
-        # Retry with plain init if provider/plugin issues detected.
-        # NOTE: never pass -upgrade — it can refresh state in some scenarios
-        # and we want strictly read-only behavior.
+        # Retry with `init -upgrade` if provider/plugin issues detected —
+        # re-downloads the provider plugins to recover from a corrupt/partial
+        # cache. This is local-only (provider binaries + .terraform.lock.hcl,
+        # which cleanup restores from git); it never touches remote state, so
+        # the scan stays read-only.
         if exit_code != 0 and any(e in plan_output for e in retryable_errors):
             subprocess.run(
                 mise_cmd("terragrunt", tg_ver, [

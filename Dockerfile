@@ -52,7 +52,7 @@ ARG CLOUD=aws
 # 1.1.3 adds: provider-cache download hardening (secret URL segment),
 # --filter negation fixes (used by --affected), the iam_role self-assume
 # regression fix, and per-unit feature-flag defaults.
-ARG TERRAFORM_VERSION=1.15.6
+ARG TERRAFORM_VERSION=1.16.0
 ARG TERRAGRUNT_VERSION=1.1.3
 ARG AWSCLI_VERSION=2.35.11
 ARG GCLOUD_VERSION=573.0.0

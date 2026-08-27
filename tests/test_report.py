@@ -32,6 +32,32 @@ class TestGetMermaidScript:
         assert "</script>" not in body
 
 
+class TestGetHtmlTemplate:
+    def test_template_has_placeholders(self):
+        tpl = report.get_html_template()
+        # the substitution tokens report.py fills in must all be present
+        for token in ("%%DATA_FILE%%", "%%REPORT_DATE%%", "%%MERMAID_SCRIPT%%"):
+            assert token in tpl
+
+
+class TestGetMermaidScriptSidecar:
+    def test_sidecar_writes_file_and_references_it(self, tmp_path):
+        if not _VENDOR_JS.exists():
+            pytest.skip("vendored mermaid.min.js not bundled")
+        script = report.get_mermaid_script(mode="sidecar", output_dir=str(tmp_path))
+        assert script == '<script src="mermaid.min.js"></script>'
+        sidecar = tmp_path / "mermaid.min.js"
+        assert sidecar.exists() and sidecar.stat().st_size > 0
+
+    def test_sidecar_dedupes_existing(self, tmp_path):
+        if not _VENDOR_JS.exists():
+            pytest.skip("vendored mermaid.min.js not bundled")
+        sidecar = tmp_path / "mermaid.min.js"
+        sidecar.write_text("stale")  # pre-existing → must not be overwritten
+        report.get_mermaid_script(mode="sidecar", output_dir=str(tmp_path))
+        assert sidecar.read_text() == "stale"
+
+
 class TestGenerateReport:
     def _make_args(self):
         return types.SimpleNamespace(diagrams=False, tags=False)

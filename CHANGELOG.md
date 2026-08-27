@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-08-27
+
+### Changed
+
+- **Plan parsing is now JSON-first.** The structured change list is built from the JSON plan (`terraform show -json <planfile>`), which is structurally exact, and the human-readable text diff is grafted on per resource as the display `body` (`_build_plan_resources()` in `process.py`). Previously the fragile `terraform plan` *text* parse was authoritative and JSON was only a fallback — wrapped lines, heredocs, or comments containing unbalanced braces could corrupt the brace-depth walk and drop or truncate resources. Text-only parsing is still used when no JSON plan was captured (older terraform). The plan summary line is likewise synthesized from the JSON change counts when terraform's own `Plan:` line is absent.
+- **Bumped pinned Terraform `1.15.6 → 1.16.0`** (Dockerfile) — latest stable, picks up the patched Go stdlib/deps that most image CVEs live in. Terragrunt stays on the latest stable `1.1.3`.
+
+### Fixed
+
+- **Azure state-age no longer truncates at 5000 blobs.** `az storage blob list` caps at 5000 results by default and silently drops the rest; state-age queries now pass `--num-results "*"` to follow continuation tokens and list the whole container (`state_age.py`). (AWS `s3api list-objects-v2` and GCS `objects list` already auto-paginate, so no truncation there; the AWS query now also passes `--prefix` when the service prefix is known, to scope large shared-state buckets.)
+- **Azure state-age uses AD token auth by default.** The blob listing now passes `--auth-mode login` (`_azure_auth_args()`), so a CI `az login` service principal with blob-data RBAC works without needing storage-account-key access — the recommended locked-down path. When an explicit credential (`AZURE_STORAGE_KEY`, `AZURE_STORAGE_ACCOUNT_KEY`, `AZURE_STORAGE_CONNECTION_STRING`, or `AZURE_STORAGE_SAS_TOKEN`) is present in the environment, az's default key/SAS auth is used instead, so existing key-based setups are unchanged.
+- **Hardened the plan-text brace walk against comments and heredocs** (`plan_parser.py`). `_count_braces` now stops at `#` / `//` line comments (an unbalanced brace in a comment no longer shifts depth), and `parse_plan_resources` tracks heredoc state (`<<-EOT … EOT`) so free-text bodies containing `{`/`}` can't truncate or overrun a resource block. The display `body` that gets grafted onto the JSON-authoritative change list is now reliable even for `user_data`/policy heredocs.
+- **Corrected a misleading init-retry comment** (`worker.py`) that claimed `-upgrade` is never passed while the retry did pass it. `init -upgrade` is local-only (provider plugins + `.terraform.lock.hcl`, which cleanup restores from git) and never touches remote state, so the scan stays read-only; the comment now explains this.
+- **Removed dead `prefix`-threading code** in `_extract_state_resources` (`process.py`) — state resource addresses are already fully qualified, so the unreachable prefix branch and its recursion argument were removed.
+- **GCS root `locals` block is now brace-walked, not regex-truncated.** `_query_gcs_blob_dates` matched the block with `locals\s*\{(.*?)\n\}`, which stops at the first `\n}` — a nested map value (e.g. `default_tags = { ... }`) truncated the body and dropped every local after it, breaking bucket/prefix resolution. It now reuses the same depth-aware brace walk as the `remote_state` parser (factored into `_brace_block()`).
+- **S3 state-age now maps multi-segment key prefixes.** Key-to-rel_path mapping previously only stripped a single leading `${local.X}/` segment (`re.match(r'\$\{local\.(\w+)\}/', ...)`), so templates with a literal prefix or multiple locals (e.g. `env/${local.Service}/${path_relative_to_include()}/…` or `${local.Env}/${local.Service}/…`) silently dropped state-age data for every unit. `_resolve_s3_static_prefix()` now resolves the entire static portion before `${path_relative_to_include()}` — literal segments plus any number of `${local.X}` refs — and bails (rather than mis-mapping) when an interpolation can't be resolved.
+
+### Tests
+
+- **`state_age.py` now has unit coverage** (`tests/test_state_age.py`, 27 cases) — timestamp offset normalisation, the brace-block walker (including nested and unbalanced input), `remote_state`/`config` scoping vs provider blocks, S3 static-prefix resolution (literal + multi-local), local resolution across sibling HCL files, provider-template heredoc extraction, and the CLI-missing guard paths. This was previously the largest untested, most parse-fragile module.
+- **`worker.py` now has unit coverage** (`tests/test_worker.py`, 10 cases) — the `.terragrunt-cache` directory scorer (generated-vs-module precedence, `examples/`/`test/` exclusion), per-unit timeout resolution, and read-only plan-arg assembly including the `--no-hooks` experiment flags. The timeout and plan-arg logic were extracted from `run_plan` into `_resolve_timeout()` / `_build_plan_args()` to make them testable without spawning terragrunt.
+- **`plan_parser.py` brace-walk coverage** (`tests/test_plan_parser.py`, +6 cases) — `_count_braces` string/comment handling and the heredoc-aware block walk.
+- **`discovery.py` filesystem-helper coverage** (`tests/test_discovery.py`, +6 cases) — source-stack detection vs generated artifacts (`find_stack_files`), rglob unit discovery with root/cache/stack skipping (`_discover_rglob`), and the `dependency` config-path regex fallback (`_parse_deps_regex`).
+- **`report.py` template + sidecar coverage** (`tests/test_report.py`, +4 cases) — placeholder presence in the HTML template and Mermaid sidecar delivery (writes `mermaid.min.js`, dedupes an existing one).
+- **Azure auth-mode coverage** (`tests/test_state_age.py`) — `_azure_auth_args` login-by-default and credential-env fallthrough. Suite is 94 tests.
+
 ## [1.6.0] - 2026-08-25
 
 ### Added

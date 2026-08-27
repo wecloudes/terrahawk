@@ -1,9 +1,58 @@
 """State age queries: Azure Blob, AWS S3, and GCS backends."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
+
+
+# Environment variables that supply an explicit Azure Storage credential. When
+# any is set, `az storage blob list` uses key/SAS auth and we must not force
+# AD token auth.
+_AZURE_KEY_ENV_VARS = (
+    "AZURE_STORAGE_KEY",
+    "AZURE_STORAGE_ACCOUNT_KEY",
+    "AZURE_STORAGE_CONNECTION_STRING",
+    "AZURE_STORAGE_SAS_TOKEN",
+)
+
+
+def _azure_auth_args(env):
+    """Choose the `az storage` auth mode for the given environment.
+
+    Returns `["--auth-mode", "login"]` to use the AD token from a CI
+    `az login` (service principal + blob-data RBAC), which does not require
+    storage-account-key access — the recommended, locked-down path. Returns
+    `[]` (az's default key/SAS auth) when an explicit account key, connection
+    string, or SAS token is present in the environment, so existing key-based
+    setups keep working unchanged.
+    """
+    if any(env.get(v) for v in _AZURE_KEY_ENV_VARS):
+        return []
+    return ["--auth-mode", "login"]
+
+
+def _brace_block(text, start):
+    """Return the body of a brace block and the index just past its close.
+
+    `start` must be the index immediately after the opening `{`. Walks braces
+    tracking depth and returns (body, end) where body is the text between the
+    braces (exclusive) and end is the index just past the matching `}`. Not
+    string-aware — HCL block bodies rarely carry literal braces inside strings.
+    """
+    depth, j = 1, start
+    while j < len(text) and depth > 0:
+        c = text[j]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        j += 1
+    # Exclude the closing brace only if we actually consumed one; on
+    # unbalanced input we walked to the end and there is nothing to trim.
+    body_end = j - 1 if depth == 0 else j
+    return text[start:body_end], j
 
 
 def _parse_hcl_string_locals(block_text):
@@ -35,15 +84,7 @@ def _extract_remote_state_config(content):
         return (backend_match.group(1) if backend_match else ""), content
 
     # Walk braces to find the whole remote_state block
-    start = rs_match.end()
-    depth, j = 1, start
-    while j < len(content) and depth > 0:
-        if content[j] == "{":
-            depth += 1
-        elif content[j] == "}":
-            depth -= 1
-        j += 1
-    rs_body = content[start:j - 1]
+    rs_body, _ = _brace_block(content, rs_match.end())
 
     # Extract backend type
     backend_match = re.search(r'backend\s*=\s*"([^"]+)"', rs_body)
@@ -54,15 +95,7 @@ def _extract_remote_state_config(content):
     if not cfg_match:
         return backend, rs_body
 
-    cfg_start = cfg_match.end()
-    depth, j = 1, cfg_start
-    while j < len(rs_body) and depth > 0:
-        if rs_body[j] == "{":
-            depth += 1
-        elif rs_body[j] == "}":
-            depth -= 1
-        j += 1
-    config_body = rs_body[cfg_start:j - 1]
+    config_body, _ = _brace_block(rs_body, cfg_match.end())
     return backend, config_body
 
 
@@ -89,9 +122,12 @@ def _query_gcs_blob_dates(config_dir, content):
     root_locals = {}
     # Bare references like `env = local.env_vars.locals.environment`
     root_local_refs = {}
-    locals_match = re.search(r'locals\s*\{(.*?)\n\}', content, re.DOTALL)
+    # Brace-walk the block rather than matching to the first `\n}` — a nested
+    # map/object value (e.g. `default_tags = { ... }`) would otherwise truncate
+    # the body and drop later locals.
+    locals_match = re.search(r'locals\s*\{', content)
     if locals_match:
-        body = locals_match.group(1)
+        body, _ = _brace_block(content, locals_match.end())
         root_locals = _parse_hcl_string_locals(body)
         for name, ref in re.findall(
             r'(\w+)\s*=\s*local\.env_vars\.locals\.(\w+)', body,
@@ -224,6 +260,38 @@ def extract_root_provider_template(config_dir):
     return ""
 
 
+def _resolve_s3_static_prefix(key_tpl, root_hcl_content, config_dir, root_hcl):
+    """Resolve the static leading portion of an S3 key template to a concrete prefix.
+
+    A state key is `<static_prefix><path_relative_to_include()>/terraform.tfstate`,
+    and `path_relative_to_include()` equals the unit's rel_path — so stripping
+    the static prefix from a listed S3 key maps it back to the rel_path-based
+    lookup key. The static prefix is everything before the dynamic
+    `${path_relative_to_include()}` segment; it may contain literal path
+    segments AND any number of `${local.X}` references (e.g.
+    `env/${local.Env}/${local.Service}/${path_relative_to_include()}/...`).
+
+    Returns the resolved prefix (with trailing content preserved as written),
+    or "" when there is no static prefix, no dynamic segment, or an
+    interpolation can't be resolved (bail rather than mis-map keys).
+    """
+    marker = "${path_relative_to_include()}"
+    if marker not in key_tpl:
+        return ""
+    head = key_tpl.split(marker, 1)[0]
+    if not head:
+        return ""
+
+    def _sub(m):
+        val = _resolve_local(m.group(1), root_hcl_content, config_dir, root_hcl)
+        return val if val else m.group(0)
+
+    resolved = re.sub(r'\$\{local\.(\w+)\}', _sub, head)
+    if "${" in resolved:  # unresolved local or other interpolation — unsafe to strip
+        return ""
+    return resolved
+
+
 def _resolve_local(local_name, root_hcl_content, config_dir, root_hcl):
     """Resolve a Terragrunt local to its string value.
 
@@ -317,6 +385,12 @@ def query_blob_dates(config_dir):
                 ["az", "storage", "blob", "list",
                  "--account-name", sa_name,
                  "--container-name", ct_name,
+                 # Use AD token auth for CI service principals unless an explicit
+                 # storage credential is in the environment (see _azure_auth_args).
+                 *_azure_auth_args(os.environ),
+                 # Default --num-results caps at 5000 blobs and silently drops
+                 # the rest; "*" follows continuation tokens and returns all.
+                 "--num-results", "*",
                  "--query", "[?ends_with(name, 'terraform.tfstate')].{name:name, lastModified:properties.lastModified}",
                  "-o", "json"],
                 capture_output=True, text=True, timeout=120,
@@ -375,22 +449,24 @@ def query_blob_dates(config_dir):
             ) if re.search(r'\$\{local\.(\w+)\}', region) else ""
             region = resolved if resolved else ""
 
-        # Determine the prefix in the key template (anything before the
-        # first dynamic segment). e.g. "${local.Service}/${path_relative_to_include()}/terraform.tfstate"
-        # → need to strip the leading Service value to map back to relative paths.
+        # Determine the static prefix in the key template (everything before
+        # ${path_relative_to_include()}) so listed keys map back to rel_paths.
+        # Handles literal segments and multiple ${local.X} refs, e.g.
+        # "env/${local.Service}/${path_relative_to_include()}/terraform.tfstate".
         key_tpl = key_match.group(1) if key_match else ""
-        service_prefix = ""
-        tpl_prefix_match = re.match(r'\$\{local\.(\w+)\}/', key_tpl)
-        if tpl_prefix_match:
-            local_name = tpl_prefix_match.group(1)
-            resolved = _resolve_local(local_name, content, config_dir, root_hcl)
-            if resolved:
-                service_prefix = resolved + "/"
+        service_prefix = _resolve_s3_static_prefix(key_tpl, content, config_dir, root_hcl)
 
+        # `aws s3api list-objects-v2` is a paginated operation: the AWS CLI
+        # auto-follows the continuation token and aggregates ALL objects, so
+        # there is no 1000-key truncation. When we know the service prefix,
+        # pass it as --prefix to list only the relevant subtree (faster and
+        # cheaper on large shared state buckets).
         cmd = ["aws", "s3api", "list-objects-v2",
                "--bucket", bucket_name,
                "--query", "Contents[].{Key:Key,LastModified:LastModified}",
                "--output", "json"]
+        if service_prefix:
+            cmd += ["--prefix", service_prefix]
         if profile:
             cmd += ["--profile", profile]
         if region:

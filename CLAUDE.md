@@ -83,7 +83,7 @@ After `terragrunt plan`, the worker (`worker.py`) collects additional data from 
 | Module source | `source = "..."` in unit's `terragrunt.hcl` | Module source display |
 | Architecture diagram | Built from `plan_json` + `state_json` (always generated; `--diagrams`/`--no-diagrams`, default on, only toggles report visibility) | Mermaid diagram |
 | Error class | `_classify_error(status, error)` in `process.py` — regex over the error text | `errorClass` entry field (`config`/`auth`/`init`/`dependency`/`plan`/`timeout`/`other`, `""` when not failed) → per-class error breakdown chips in the HTML report |
-| Plan JSON | `terraform show -json <planfile>` (captured on exit 0 AND 2) | Structured `resource_changes` (fallback when text parse fails) + `resource_drift` |
+| Plan JSON | `terraform show -json <planfile>` (captured on exit 0 AND 2) | Authoritative `resource_changes` for the structured change list (`_build_plan_resources` in `process.py`; text parse only supplies the human-readable diff `body`) + `resource_drift` |
 | Out-of-band drift | `plan_json.resource_drift` | `driftedResources` entry field → "⚠ N ext" badge (HTML), "Changed Outside Terraform" section (TUI). Surfaces even on clean plans |
 | Unit duration | `time.monotonic()` around plan + collection | `duration` field, console `(Ns)` suffix |
 | Rendered config | `terragrunt render --format json` (per unit, after plan) | Resolved module source, resolved input values (secret-named inputs masked), exact remote_state key for state age. Regex fallbacks remain for old terragrunt |

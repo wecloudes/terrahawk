@@ -41,3 +41,60 @@ class TestClassifyError:
 
     def test_case_insensitive(self):
         assert process._classify_error("error", "UNKNOWN VARIABLE foo") == "config"
+
+
+class TestBuildPlanResources:
+    _PLAN_JSON = {
+        "resource_changes": [
+            {"address": "aws_instance.web", "type": "aws_instance",
+             "change": {"actions": ["create"], "before": None, "after": {"ami": "abc"}}},
+            {"address": "aws_db_instance.pg", "type": "aws_db_instance",
+             "change": {"actions": ["delete", "create"], "before": {"x": 1}, "after": {"x": 2}}},
+            {"address": "aws_s3_bucket.noop", "type": "aws_s3_bucket",
+             "change": {"actions": ["no-op"]}},
+        ]
+    }
+
+    def test_json_is_authoritative_when_present(self):
+        # Text parse finds nothing, JSON drives the change set (no-op filtered).
+        res = process._build_plan_resources("drift", "", self._PLAN_JSON)
+        got = {r["address"]: r["action"] for r in res}
+        assert got == {"aws_instance.web": "create", "aws_db_instance.pg": "replace"}
+
+    def test_text_body_grafted_onto_json(self):
+        plan_text = (
+            "  # aws_instance.web will be created\n"
+            '  + resource "aws_instance" "web" {\n'
+            '      + ami = "abc"\n'
+            "    }\n"
+        )
+        res = process._build_plan_resources("drift", plan_text, self._PLAN_JSON)
+        web = next(r for r in res if r["address"] == "aws_instance.web")
+        # Human-readable text body wins over the JSON before/after dump.
+        assert '+ resource "aws_instance" "web"' in web["body"]
+
+    def test_falls_back_to_text_without_json(self):
+        plan_text = (
+            "  # aws_instance.web will be created\n"
+            '  + resource "aws_instance" "web" {\n'
+            "    }\n"
+        )
+        res = process._build_plan_resources("drift", plan_text, None)
+        assert [r["address"] for r in res] == ["aws_instance.web"]
+
+    def test_non_drift_without_json_is_empty(self):
+        assert process._build_plan_resources("clean", "irrelevant", None) == []
+
+
+class TestPlanSummary:
+    def test_prefers_text_summary(self):
+        assert process._plan_summary("Plan: 3 to add.", [{"action": "create"}]) == "Plan: 3 to add."
+
+    def test_synthesizes_from_counts_when_text_missing(self):
+        res = [{"action": "create"}, {"action": "replace"}, {"action": "update"}]
+        # replace counts as both add and destroy
+        assert process._plan_summary("", res) == "Plan: 2 to add, 1 to change, 1 to destroy."
+
+    def test_empty_when_nothing(self):
+        assert process._plan_summary("", []) == ""
+        assert process._plan_summary("", [{"action": "read"}]) == ""
