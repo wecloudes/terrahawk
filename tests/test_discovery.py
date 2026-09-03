@@ -45,6 +45,27 @@ class TestDiscoverRglob:
         assert all(os.path.isabs(ud) for ud, _ in units)
 
 
+class TestIsAlwaysSkipped:
+    @pytest.mark.parametrize("rel", [
+        ".migration-backup/eysa/production/vpc",  # hidden dir at root
+        "eysa/.bak/vpc",                          # hidden dir mid-path
+        ".git/x",
+        "catalog/units/vpc",                      # module catalog
+        "eysa/catalog/vpc",                       # catalog mid-path
+    ])
+    def test_skipped(self, rel):
+        assert discovery._is_always_skipped(rel) is True
+
+    @pytest.mark.parametrize("rel", [
+        "eysa/production/eu-west-1/vpc",
+        "eysa/production/eu-west-1/.terragrunt-stack/vpc",       # generated stack unit kept
+        "eysa/production/eu-west-1/.terragrunt-stack/services/keycloak",
+        "catalogue/vpc",                                         # substring, not a segment
+    ])
+    def test_kept(self, rel):
+        assert discovery._is_always_skipped(rel) is False
+
+
 class TestParseDepsRegex:
     def test_extracts_dependency_config_paths(self, tmp_path):
         vpc = tmp_path / "vpc"; app = tmp_path / "app"

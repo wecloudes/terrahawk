@@ -5,6 +5,22 @@ import pytest
 from terrahawk import process
 
 
+class TestStackDisplayName:
+    @pytest.mark.parametrize("before,expected", [
+        ("dum/production/eu-west-1", "dum/production"),
+        ("eysa/production/eu-west-1", "eysa/production"),
+        ("eysa/preproduction/eu-west-1", "eysa/preproduction"),
+        ("shared/eu-west-1", "shared"),
+        ("prod/us-gov-west-1", "prod"),        # aws gov region
+        ("prod/europe-west1", "prod"),         # gcp region
+        ("envA/mystack", "envA/mystack"),      # non-region tail kept
+        ("solo", "solo"),                      # single segment untouched
+        ("eu-west-1", "eu-west-1"),            # lone region: nothing to strip
+    ])
+    def test_names(self, before, expected):
+        assert process._stack_display_name(before) == expected
+
+
 @pytest.mark.skipif(
     not hasattr(process, "_classify_error"),
     reason="_classify_error not present yet",

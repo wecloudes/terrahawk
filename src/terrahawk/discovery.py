@@ -8,6 +8,36 @@ from collections import defaultdict, deque
 
 from .deps import mise_cmd
 
+# Terragrunt's own generated dot-dirs. They start with "." but hold real,
+# scannable units (stack members) or working copies — exempt from the
+# hidden-dir skip rule below.
+_TG_GENERATED_DIRS = {".terragrunt-stack", ".terragrunt-cache"}
+
+# Directory-name segments whose presence anywhere in a unit's rel_path always
+# marks it non-scannable, regardless of --exclude:
+#   - "catalog": holds reusable module wrappers (a module catalog), which are
+#     templates for stacks, not deployable units.
+_ALWAYS_SKIP_SEGMENTS = {"catalog"}
+
+
+def _is_always_skipped(rel_path):
+    """True when rel_path lives under a hidden dir or a module catalog.
+
+    Hidden dirs (any path segment starting with "." — e.g. .migration-backup,
+    .git, .idea) hold backups/VCS/tooling, never live units. Terragrunt's own
+    generated dot-dirs (.terragrunt-stack / .terragrunt-cache) are exempt: stack
+    members are real units. `catalog` segments are module catalogs, not units.
+    Applied to native + rglob discovery alike, before --exclude.
+    """
+    for seg in rel_path.replace("\\", "/").split("/"):
+        if seg in _TG_GENERATED_DIRS:
+            continue
+        if seg.startswith("."):
+            return True
+        if seg in _ALWAYS_SKIP_SEGMENTS:
+            return True
+    return False
+
 
 def find_stack_files(config_dir):
     """Return dirs holding a *source* terragrunt.stack.hcl.
@@ -87,6 +117,9 @@ def discover_units(config_dir, exclude_pattern="", tg_ver="", filter_expr=None):
     # Drop the repository root's own terragrunt.hcl (discovered as rel_path
     # "." / ""): it has no region.hcl/env.hcl above it, so it always errors.
     units = [(ud, rp) for ud, rp in units if rp not in (".", "")]
+
+    # Always drop hidden dirs (.migration-backup, .git, …) and module catalogs.
+    units = [(ud, rp) for ud, rp in units if not _is_always_skipped(rp)]
 
     if exclude_pattern:
         units = [(ud, rp) for ud, rp in units if not re.search(exclude_pattern, rp)]

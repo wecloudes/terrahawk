@@ -599,6 +599,26 @@ def _compute_state_age(rel_path, blob_dates, raw=None):
         return None
 
 
+# A trailing region-like segment (AWS eu-west-1/us-gov-west-1, GCP europe-west1)
+# in a stack root — the stack layout here is <env>/<sub>/<region>, so the region
+# dir alone is a poor, collision-prone stack name.
+_REGION_SEG_RE = re.compile(r"^(?:[a-z]{2}(?:-[a-z]+)+-\d+|[a-z]+-[a-z]+\d+)$")
+
+
+def _stack_display_name(before):
+    """Name a stack from its root path (the part before `/.terragrunt-stack/`).
+
+    Uses the full root rel_path so distinct stacks don't collide (basename alone
+    made every `<env>/<sub>/eu-west-1` stack read as `eu-west-1`). A trailing
+    region segment is dropped when at least one segment remains, so
+    `dum/production/eu-west-1` → `dum/production`, `shared/eu-west-1` → `shared`.
+    """
+    segs = [s for s in before.split("/") if s]
+    if len(segs) >= 2 and _REGION_SEG_RE.match(segs[-1]):
+        segs = segs[:-1]
+    return "/".join(segs)
+
+
 def process_result(raw, args, blob_dates, root_provider_tpl=""):
     """Process raw worker result into final report entry."""
     rel_path = raw["unit"]
@@ -614,7 +634,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
     display_path = rel_path
     if is_stack:
         before, _, after = rel_path.partition("/.terragrunt-stack/")
-        stack_name = before.rsplit("/", 1)[-1]
+        stack_name = _stack_display_name(before)
         display_path = f"{before}/{after}" if after else before
 
     segments = display_path.split("/")

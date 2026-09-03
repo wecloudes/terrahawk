@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from .incremental import load_manifest, hash_file, save_manifest
 from .worker import run_plan
 from .process import process_result, build_stack_graphs
 from .state_age import query_blob_dates, extract_root_provider_template
+from .profiles import build_unit_profile_map, state_bucket_profile
 from .report import generate_report
 from .graph import cmd_graph
 from .hygiene import check_hygiene, attach_hygiene
@@ -72,6 +74,11 @@ def _parse_args(repo_root):
     parser.add_argument("--no-stacks", action="store_true", default=config.get("no_stacks") == "true",
                         help="Skip `terragrunt stack generate` for terragrunt.stack.hcl files. By default stacks "
                              "are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x)")
+    parser.add_argument("--profile", action="append", default=None, metavar="NAME",
+                        help="AWS profile to scan with (repeatable). With 2+ profiles, terrahawk maps each "
+                             "unit to the profile owning its account (via `aws sts get-caller-identity` + the "
+                             "unit's env.hcl aws_account_id), so multiple accounts land in ONE report. "
+                             "Config: aws_profiles: a,b in .terrahawk.yml")
     parser.add_argument("--terraform-version", type=str, default=config.get("terraform_version", ""))
     parser.add_argument("--terragrunt-version", type=str, default=config.get("terragrunt_version", ""))
     parser.add_argument("--push-url", type=str, default=config.get("push_url") or None,
@@ -80,7 +87,12 @@ def _parse_args(repo_root):
                         default=config.get("push_token") or os.environ.get("TERRAKETTLE_TOKEN"),
                         help="Terrakettle per-project push token (default: $TERRAKETTLE_TOKEN)")
     parser.add_argument("--version", action="version", version=f"terrahawk {__version__}")
-    return parser.parse_args()
+    args = parser.parse_args()
+    # `action=append` can't take a config default cleanly; fall back to the
+    # comma/space-separated `aws_profiles` from .terrahawk.yml when no --profile.
+    if not args.profile and config.get("aws_profiles"):
+        args.profile = [p.strip() for p in config["aws_profiles"].replace(",", " ").split() if p.strip()]
+    return args
 
 
 def _clean_cache(repo_root):
@@ -469,6 +481,21 @@ def main():
     units, last_json = _apply_incremental(args, units, output_dir)
     total_to_scan = len(units)
 
+    # Multi-account: map each unit to the AWS profile owning its account so one
+    # scan spans several accounts into a single report. Empty when no --profile.
+    args.unit_profiles = {}
+    state_profile = None
+    if getattr(args, "profile", None):
+        print(f"🔑 Resolving AWS profiles: {', '.join(args.profile)}")
+        args.unit_profiles, acct_prof = build_unit_profile_map(units, config_dir, args.profile)
+        if len(args.profile) > 1:
+            counts = Counter(args.unit_profiles.values())
+            summary = ", ".join(f"{p}={counts[p]}" for p in args.profile if counts.get(p))
+            print(f"  Units per profile: {summary or 'none matched'}")
+            state_profile = state_bucket_profile(config_dir, acct_prof, args.profile)
+        else:
+            state_profile = args.profile[0]
+
     # HCL hygiene (terragrunt 1.x: hcl validate + hcl format --check)
     print("\U0001f9fc Checking HCL hygiene...")
     hygiene = check_hygiene(config_dir, args.terragrunt_version)
@@ -479,9 +506,21 @@ def main():
         n_fmt = len(hygiene["unformatted"])
         print(f"  {n_diag} validation issue(s), {n_fmt} unformatted file(s)")
 
-    # Query state ages
+    # Query state ages. State lives in one (possibly cross-account) bucket, so
+    # the one-shot listing runs under the bucket owner's profile when scanning
+    # multiple accounts.
     print("\U0001f4c5 Querying state file ages...")
-    blob_dates = query_blob_dates(config_dir)
+    _saved_profile = os.environ.get("AWS_PROFILE")
+    if state_profile:
+        os.environ["AWS_PROFILE"] = state_profile
+    try:
+        blob_dates = query_blob_dates(config_dir)
+    finally:
+        if state_profile:
+            if _saved_profile is None:
+                os.environ.pop("AWS_PROFILE", None)
+            else:
+                os.environ["AWS_PROFILE"] = _saved_profile
 
     # Extract global provider template from root terragrunt.hcl
     root_provider_tpl = extract_root_provider_template(config_dir)

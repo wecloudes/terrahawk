@@ -119,6 +119,25 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 .unit-row.status-drift .unit-status::after{content:'\21BB';color:var(--yellow);font-weight:700}
 .unit-row.status-error .unit-status::after{content:'\2717';color:var(--red)}
 .unit-row.status-timeout .unit-status::after{content:'\23F1';color:var(--orange)}
+/* Stack treeview */
+.tree-indent{font-family:'Roboto Mono',monospace;white-space:pre;color:var(--border);flex-shrink:0;font-size:13px;line-height:1}
+.tree-row{display:flex;align-items:center;padding:9px 20px;border-bottom:1px solid var(--border);font-size:14px;cursor:pointer;user-select:none;transition:background .1s}
+.tree-row:last-child{border-bottom:none}
+.tree-row:hover{background:var(--hover)}
+.tree-row .tree-caret{width:16px;flex-shrink:0;color:var(--text-dim);font-size:11px;text-align:center}
+.tree-row .tree-name{font-family:'Roboto Mono',monospace;font-size:13px;font-weight:600;color:var(--text)}
+.tree-row.stack-head{background:var(--surface)}
+.tree-row.stack-head.top{padding:14px 20px;border:1px solid var(--border);border-radius:8px 8px 0 0}
+.tree-row.stack-head.top .tree-name{font-size:15px}
+.tree-children.top-body{border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;overflow:hidden}
+.tree-row.stack-head .stk-ico{color:var(--blue);margin-right:8px;font-size:14px}
+.tree-row.stack-head .tree-name{color:var(--blue)}
+.tree-row.folder .tree-name{color:var(--text-muted)}
+.tree-count{font-size:11px;color:var(--text-muted);margin-left:10px}
+.tree-badges{display:flex;gap:5px;margin-left:auto;padding-left:12px;flex-shrink:0}
+.tree-badges .badge{font-size:10px;padding:1px 7px;border-radius:9px}
+.tree-children.collapsed{display:none}
+.tree-row.folder .tree-name::before{content:'\1F4C1';margin-right:6px;font-size:11px;opacity:.7}
 .badge-timeout{background:var(--orange-bg);color:var(--orange);border:1px solid var(--orange-border)}
 .modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
@@ -702,22 +721,34 @@ function render(){
   filtered.forEach(d=>{const k=d.environment+'/'+d.subscription;if(!groups[k])groups[k]=[];groups[k].push(d);});
   let html='';
   for(const[group,units]of Object.entries(groups).sort()){
-    const gc=units.filter(u=>u.status==='clean').length,gd=units.filter(u=>u.status==='drift').length,ge=units.filter(u=>u.status==='error').length,gto=units.filter(u=>u.status==='timeout').length;
-    let badges='';if(gc)badges+=`<span class="badge badge-clean">${gc} clean</span>`;if(gd)badges+=`<span class="badge badge-drift">${gd} drift</span>`;if(ge)badges+=`<span class="badge badge-error">${ge} error</span>`;if(gto)badges+=`<span class="badge badge-timeout">${gto} timeout</span>`;
-    html+=`<div class="sub-section"><div class="sub-header" onclick="toggleSection(this)"><h2><span class="arrow">\u25BC</span> ${esc(group)}</h2><div class="sub-badges">${badges}</div></div><div class="sub-body">`;
     const sortBy=document.getElementById('sort-select')?.value||'status';
-    units.sort((a,b)=>{
+    const cmp=(a,b)=>{
       if(sortBy==='name')return a.unit.localeCompare(b.unit);
       if(sortBy==='resources')return(b.resourceCount||0)-(a.resourceCount||0);
       if(sortBy==='duration')return(b.duration||0)-(a.duration||0);
       const o={drift:0,error:1,timeout:2,clean:3};return(o[a.status]??9)-(o[b.status]??9)||a.unit.localeCompare(b.unit);
-    });
-    units.forEach((u,i)=>{
+    };
+    const ctr={n:0};
+    const stackUnits=units.filter(u=>u.isStack);
+    const flatUnits=units.filter(u=>!u.isStack).sort(cmp);
+    const stkNames=[...new Set(stackUnits.map(u=>u.stackName||'stack'))];
+    // A section that is exactly one stack (no loose units) would otherwise show
+    // a group header AND a stack header for the same thing. Merge them: render
+    // just the stack row (labelled with the stack name, which already drops the
+    // region — the group label may still carry it, e.g. shared/eu-west-1).
+    if(flatUnits.length===0&&stkNames.length===1){
+      html+=`<div class="sub-section">`+renderStackTree(stkNames[0],stackUnits,group,ctr,true)+`</div>`;
+      continue;
+    }
+    const gc=units.filter(u=>u.status==='clean').length,gd=units.filter(u=>u.status==='drift').length,ge=units.filter(u=>u.status==='error').length,gto=units.filter(u=>u.status==='timeout').length;
+    let badges='';if(gc)badges+=`<span class="badge badge-clean">${gc} clean</span>`;if(gd)badges+=`<span class="badge badge-drift">${gd} drift</span>`;if(ge)badges+=`<span class="badge badge-error">${ge} error</span>`;if(gto)badges+=`<span class="badge badge-timeout">${gto} timeout</span>`;
+    html+=`<div class="sub-section"><div class="sub-header" onclick="toggleSection(this)"><h2><span class="arrow">\u25BC</span> ${esc(group)}</h2><div class="sub-badges">${badges}</div></div><div class="sub-body">`;
+    flatUnits.forEach((u,i)=>{
       const didx=DATA.indexOf(u);
       const hasDiff=u.status==='drift'&&u.diff,hasErr=(u.status==='error'||u.status==='timeout')&&u.error;
       const hasOob=(u.driftedResources||[]).length>0;
       const exp=hasDiff||hasErr||hasOob;
-      const uid=group.replace(/\//g,'_')+'_'+i;
+      const uid=group.replace(/\//g,'_')+'_f'+i;
       const hasDiag=showDiagrams&&u.planDiagram;
       const hasTag=showTags&&u.tags&&Object.keys(u.tags).length>0;
       const hasPlan=u.status==='drift'&&(u.planResources||[]).length>0;
@@ -751,8 +782,90 @@ function render(){
         if(hasDiff)html+=`<div class="diff-content">${hl(u.diff)}</div>`;
         if(hasErr)html+=`<div class="error-content">${esc(u.error)}</div>`;
         html+=`</div>`;}
-    });html+=`</div></div>`;}
+    });
+    // Stacks: one collapsible, path-nested tree per stackName.
+    const stackNames=[...new Set(stackUnits.map(u=>u.stackName||'stack'))].sort();
+    stackNames.forEach(sn=>{const mem=stackUnits.filter(u=>(u.stackName||'stack')===sn);html+=renderStackTree(sn,mem,group,ctr);});
+    html+=`</div></div>`;}
   document.getElementById('results').innerHTML=html||'<p style="text-align:center;color:var(--text-muted);padding:40px;">No units match filters.</p>';}
+
+// Render one stack member as a tree leaf: the standard unit-row (+ diff panel),
+// prefixed with the tree-guide `indent` and labelled with just the leaf name.
+function unitLeaf(u,uid,indent,label){
+  const didx=DATA.indexOf(u);
+  const hasDiff=u.status==='drift'&&u.diff,hasErr=(u.status==='error'||u.status==='timeout')&&u.error;
+  const hasOob=(u.driftedResources||[]).length>0;
+  const exp=hasDiff||hasErr||hasOob;
+  const hasDiag=showDiagrams&&u.planDiagram;
+  const hasTag=showTags&&u.tags&&Object.keys(u.tags).length>0;
+  const hasPlan=u.status==='drift'&&(u.planResources||[]).length>0;
+  const sq=document.getElementById('search').value.toLowerCase();
+  let html=`<div class="unit-row status-${u.status} ${exp?'has-diff':''}" ${exp?`onclick="toggleDiff('${uid}')"`:''}>`;
+  html+=`<span class="tree-indent">${indent}</span>`;
+  html+=`<div class="unit-status"></div><div class="unit-path">${label}</div>`;
+  if(u.summary)html+=`<div class="unit-summary">${esc(u.summary)}</div>`;
+  if(u.stateAgeDays!=null){const d=u.stateAgeDays;const cls=d>180?'state-180':d>90?'state-90':d>30?'state-30':'state-fresh';html+=`<span class="state-badge ${cls}" title="Last applied ${d} days ago">${d}d</span>`;}
+  if(u.duration!=null)html+=`<span class="dur-badge" title="Scan duration">${Math.round(u.duration)}s</span>`;
+  const oob=u.driftedResources||[];
+  if(oob.length){const names=oob.slice(0,8).map(r=>`${r.address} (${(r.actions||[]).join(',')})`).join('\n');const more=oob.length>8?`\n\u2026and ${oob.length-8} more`:'';html+=`<span class="oob-badge" title="Changed outside Terraform:\n${esc(names+more)}">\u26A0 ${oob.length} ext</span>`;}
+  const hcl=u.hclIssues||[];
+  if(hcl.length){const det=hcl.slice(0,5).map(i=>`${i.file}:${i.line||'?'} ${i.summary}`).join('\n');html+=`<span class="oob-badge" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" title="HCL validation:\n${esc(det)}">hcl ${hcl.length}</span>`;}
+  if((u.unformattedFiles||[]).length)html+=`<span class="oob-badge" title="Needs formatting:\n${esc(u.unformattedFiles.join('\n'))}">fmt</span>`;
+  html+=`<div class="unit-actions">`;
+  html+=`<span class="act-btn act-info" onclick="event.stopPropagation();showModuleInfo(${didx})" title="Module inputs &amp; outputs"><span class="act-icon">\u2139</span></span>`;
+  if(hasPlan)html+=`<span class="act-btn act-plan" onclick="event.stopPropagation();showPlanPopup(${didx})" title="Plan details"><span class="act-icon">\u{1f4cb}</span> ${(u.planResources||[]).length}</span>`;
+  if(hasDiag)html+=`<span class="act-btn act-diag" onclick="event.stopPropagation();showPlanDiagram(${didx})" title="Architecture diagram"><span class="act-icon">\u{1f5fa}</span></span>`;
+  if(hasTag)html+=`<span class="act-btn act-tag" onclick="event.stopPropagation();showTagPopup(${didx})" title="Tags"><span class="act-icon">\u{1f3f7}</span> ${Object.keys(u.tags).length}</span>`;
+  html+=`</div>`;
+  html+=`<div class="unit-expand"${exp?` id="arrow-${uid}"`:''}>${exp?'\u25B6':''}</div></div>`;
+  if(exp){html+=`<div class="diff-panel" id="diff-${uid}">`;
+    if(hasOob){html+=`<div class="oob-content"><div class="oob-title">\u26A0 Changed outside Terraform (${u.driftedResources.length})</div>`;
+      u.driftedResources.forEach(r=>{html+=`<div class="oob-row"><span class="oob-act">${esc((r.actions||[]).join(','))}</span> ${esc(r.address)}</div>`;});
+      html+=`</div>`;}
+    if(hasDiff)html+=`<div class="diff-content">${hl(u.diff)}</div>`;
+    if(hasErr)html+=`<div class="error-content">${esc(u.error)}</div>`;
+    html+=`</div>`;}
+  return html;
+}
+// Nest a stack's members by their path below `.terragrunt-stack/`.
+function stackRel(u){const p=(u.unit||'').split('/.terragrunt-stack/');return p.length>1?p[1]:(u.displayUnit||u.unit||'');}
+function buildTree(units){
+  const root={name:'',kids:new Map(),unit:null};
+  units.forEach(u=>{const parts=stackRel(u).split('/');let n=root;parts.forEach((p,i)=>{if(!n.kids.has(p))n.kids.set(p,{name:p,kids:new Map(),unit:null});n=n.kids.get(p);if(i===parts.length-1)n.unit=u;});});
+  return root;
+}
+function treeStatus(node){const c={clean:0,drift:0,error:0,timeout:0};(function w(n){if(n.unit&&c[n.unit.status]!=null)c[n.unit.status]++;n.kids.forEach(w);})(node);return c;}
+function rollBadges(c){let b='';if(c.drift)b+=`<span class="badge badge-drift">${c.drift} drift</span>`;if(c.error)b+=`<span class="badge badge-error">${c.error} err</span>`;if(c.timeout)b+=`<span class="badge badge-timeout">${c.timeout} to</span>`;if(c.clean)b+=`<span class="badge badge-clean">${c.clean} clean</span>`;return b;}
+function indentHtml(anc,last){let s='';anc.forEach(a=>{s+=a?'  ':'\u2502 ';});s+=last?'\u2514\u2500':'\u251C\u2500';return s;}
+function renderStackTree(sn,mem,group,ctr,top){
+  const root=buildTree(mem),roll=treeStatus(root);
+  const sid='s'+group.replace(/\W/g,'')+'_'+sn.replace(/\W/g,'')+'_'+(ctr.n++);
+  const hc=top?'tree-row stack-head top':'tree-row stack-head';
+  const bc=top?'tree-children top-body':'tree-children';
+  let h=`<div class="${hc}" onclick="toggleTree(event,'${sid}')"><span class="tree-caret" id="cr-${sid}">\u25BE</span><span class="stk-ico">\u25A4</span><span class="tree-name">${esc(sn)}</span><span class="tree-count">${mem.length} units</span><span class="tree-badges">${rollBadges(roll)}</span></div>`;
+  h+=`<div class="${bc}" id="ch-${sid}">`+renderChildren(root,group,ctr,[],sid)+`</div>`;
+  return h;
+}
+function renderChildren(node,group,ctr,anc,sid){
+  // Folders first (alphabetical), then leaf units (alphabetical).
+  const isFolder=k=>node.kids.get(k).kids.size>0;
+  const keys=[...node.kids.keys()].sort((a,b)=>(isFolder(b)-isFolder(a))||a.localeCompare(b));
+  let h='';
+  keys.forEach((k,idx)=>{
+    const child=node.kids.get(k),last=idx===keys.length-1,ind=indentHtml(anc,last);
+    if(child.unit&&child.kids.size===0){
+      h+=unitLeaf(child.unit,'stk'+(ctr.n++),ind,`<span class="app-name">${esc(k)}</span>`);
+    }else{
+      const fid=sid+'_'+(ctr.n++),roll=treeStatus(child);
+      h+=`<div class="tree-row folder" onclick="toggleTree(event,'${fid}')"><span class="tree-indent">${ind}</span><span class="tree-caret" id="cr-${fid}">\u25BE</span><span class="tree-name">${esc(k)}</span><span class="tree-badges">${rollBadges(roll)}</span></div>`;
+      h+=`<div class="tree-children" id="ch-${fid}">`+renderChildren(child,group,ctr,anc.concat(last),fid);
+      if(child.unit)h+=unitLeaf(child.unit,'stk'+(ctr.n++),indentHtml(anc.concat(last),true),`<span class="app-name">${esc(k)}</span> <span style="color:var(--text-dim)">(unit)</span>`);
+      h+=`</div>`;
+    }
+  });
+  return h;
+}
+function toggleTree(e,id){if(e&&e.stopPropagation)e.stopPropagation();const ch=document.getElementById('ch-'+id),cr=document.getElementById('cr-'+id);if(ch){ch.classList.toggle('collapsed');if(cr)cr.textContent=ch.classList.contains('collapsed')?'\u25B8':'\u25BE';}}
 function toggleSection(el){el.classList.toggle('collapsed');el.nextElementSibling.classList.toggle('hidden');}
 function toggleDiff(uid){const p=document.getElementById('diff-'+uid),a=document.getElementById('arrow-'+uid);if(p){p.classList.toggle('open');if(a)a.textContent=p.classList.contains('open')?'\u25BC':'\u25B6';}}
 let diagramCounter=0,dScale=1,dX=0,dY=0,dDragging=false,dStartX=0,dStartY=0;

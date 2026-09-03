@@ -91,6 +91,11 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     plan_env = os.environ.copy()
     plan_env["TF_PLUGIN_CACHE_DIR"] = os.path.expanduser("~/.terraform.d/plugin-cache")
     plan_env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "true"
+    # Multi-account: use the AWS profile mapped to this unit's account so plan,
+    # init retry, and render all run with the right credentials.
+    unit_profile = (getattr(args, "unit_profiles", None) or {}).get(rel_path)
+    if unit_profile:
+        plan_env["AWS_PROFILE"] = unit_profile
 
     tf_ver = getattr(args, "terraform_version", "")
     tg_ver = getattr(args, "terragrunt_version", "")

@@ -51,6 +51,7 @@ A **unit** is any subdirectory of `config_dir` that contains a `terragrunt.hcl` 
 - **Native path (preferred)**: runs `terragrunt find --format json --dependencies` in `config_dir`. Terragrunt's own HCL parser returns units plus exact dependency lists (catches `dependencies { paths }` blocks, include-based deps, and stacks). `discover_units()` returns `(units, deps)` where `deps` maps `unit_dir -> set(dependency_unit_dirs)`.
 - **Fallback path**: when `terragrunt find` fails (older terragrunt, parse error), falls back to `config_dir.rglob("terragrunt.hcl")` and returns `deps=None`; `build_dag()` then re-parses `dependency` blocks with a regex (which misses `dependencies { paths }` blocks).
 - Skips any path containing `.terragrunt-cache`
+- **Always-skipped** (`_is_always_skipped()`, applied to both discovery paths before `--exclude`): any unit whose `rel_path` has a hidden segment (starts with `.`, e.g. `.migration-backup`, `.git`, `.idea`) or a `catalog` segment (module catalogs = reusable module wrappers, not deployable units). Terragrunt's own generated `.terragrunt-stack` / `.terragrunt-cache` dot-dirs are exempt from the hidden-dir rule (stack members are real units)
 - Skips the root `config_dir` itself (the root `terragrunt.hcl` / `root.hcl` is config, not a unit)
 - Unit dirs are `os.path.realpath`-resolved so dependency paths match across symlinks
 - Each unit's `rel_path` is relative to `config_dir` (e.g., `landingzones/production/westeurope/app-gateway`)
@@ -63,7 +64,7 @@ Explicit stacks define units in a `terragrunt.stack.hcl` file; those units only 
 
 - Before discovery, `generate_stacks()` (`discovery.py`) globs `config_dir` for source `terragrunt.stack.hcl` files (skipping `.terragrunt-cache` / `.terragrunt-stack`) and runs `terragrunt stack generate --working-dir=<stack root>` in each. Nested stacks materialise recursively.
 - The native `find` path then surfaces the generated units as `type=unit` — no discovery change needed. Each drift-scans and reports like a normal unit; the on-disk `rel_path` keeps the `.terragrunt-stack/` segment (used as canonical id + state key).
-- **Presentation**: `process_result()` flags these units — `isStack: true`, `stackName` (the stack root's basename), and `displayUnit` (the `.terragrunt-stack/` marker collapsed out). Environment/subscription/region/application segments are derived from `displayUnit`, so grouping isn't polluted by the marker. The HTML report shows a blue `▤ stack · <name>` badge and renders `displayUnit`; the TUI shows an `S` indicator in the list and a `Stack:` line in the detail view. Per-unit architecture diagrams work unchanged (built from the generated unit's own plan/state JSON).
+- **Presentation**: `process_result()` flags these units — `isStack: true`, `stackName` (the stack root's rel_path via `_stack_display_name()` — full path so stacks don't collide, minus a trailing region segment: `dum/production/eu-west-1` → `dum/production`, `shared/eu-west-1` → `shared`), and `displayUnit` (the `.terragrunt-stack/` marker collapsed out). Environment/subscription/region/application segments are derived from `displayUnit`, so grouping isn't polluted by the marker. **HTML report treeview**: within each `env/subscription` section, stack members render as a collapsible, path-nested tree (`renderStackTree`/`renderChildren`/`unitLeaf` in `report.html`) instead of flat blue-badge rows — a `▤ <stackName>` header with rollup status badges + unit count, intermediate path segments (`services/`, `databases/`, `security-groups/`) as collapsible `📁` folder rows with their own rollups, and units as leaves under `├─`/`└─` guide lines. Leaf rows keep all the usual per-unit affordances (status icon, state-age/duration/oob/hcl badges, module-info/plan/diagram/tag actions, expandable diff). Non-stack units still render flat. The TUI shows an `S` indicator in the list and a `Stack:` line in the detail view. Per-unit architecture diagrams work unchanged (built from the generated unit's own plan/state JSON).
 - **Units-in-stack diagram**: `build_stack_graphs(results, deps, dir_by_relpath)` (`process.py`) emits one Mermaid graph per stack root — member units as nodes (coloured by status), intra-stack `dependency → dependent` edges from the discovery DAG. Written to the companion `_data.js` as `window.TERRAHAWK_STACKS` (list of `{name, root, mermaid, unitCount}`). The report shows a "▤ Stacks" chip bar above the unit list; clicking a chip opens the graph in the shared pan/zoom Mermaid modal (`showStackDiagram` → `renderDiagramModal`). Edges need native discovery (`deps`); on the rglob fallback, nodes render without edges.
 - **Auto-detected**: no stack files → no-op. Disable with `--no-stacks` (or `no_stacks: true` in `.terrahawk.yml`) to leave a user-managed `.terragrunt-stack` tree untouched.
 - **Cleanup**: `_cleanup(clean_stacks=True)` removes generated `.terragrunt-stack` trees after the scan — but **only** when this run generated them (never touches a pre-existing tree, i.e. when `--no-stacks` was set).
@@ -193,6 +194,7 @@ terrahawk/
 │   ├── plan_parser.py           # parse_plan_resources + helpers
 │   ├── process.py               # process_result orchestrator + sub-processors
 │   ├── state_age.py             # query_blob_dates (Azure/AWS/GCS), extract_root_provider_template
+│   ├── profiles.py              # Multi-account: map unit → AWS profile by account (env.hcl + sts)
 │   ├── report.py                # get_html_template, generate_report
 │   ├── graph.py                 # terragrunt dag graph → Mermaid (terrahawk graph)
 │   ├── hygiene.py               # hcl validate + hcl format --check (per-unit annotations)
@@ -212,7 +214,7 @@ terrahawk/
 
 ```
 cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
-           worker.py, process.py, state_age.py, report.py, tui.py, push.py
+           worker.py, process.py, state_age.py, profiles.py, report.py, tui.py, push.py
 worker.py ──→ deps.py (mise_cmd helper)
 discovery.py ──→ deps.py (mise_cmd helper)
 graph.py ──→ deps.py (mise_cmd helper)
@@ -221,7 +223,7 @@ process.py ──→ plan_parser.py
 (all other modules: only stdlib)
 ```
 
-When adding new modules, **never introduce import cycles**. Leaf modules (deps, config, incremental, plan_parser, state_age, report) must only import from the standard library. `worker.py` and `discovery.py` may import from `deps.py` for the `mise_cmd` helper.
+When adding new modules, **never introduce import cycles**. Leaf modules (deps, config, incremental, plan_parser, state_age, profiles, report) must only import from the standard library (`profiles.py` also shells out to the `aws` CLI). `worker.py` and `discovery.py` may import from `deps.py` for the `mise_cmd` helper.
 
 ### Module Responsibilities
 
@@ -236,6 +238,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 | `plan_parser.py` | Extracts structured resource changes from `terraform plan` text output |
 | `process.py` | Transforms raw worker results into report entries. Sub-processors: `_classify_status`, `_process_diagram`, `_process_tags`, `_process_outputs`, `_process_inputs`, `_process_providers`, `_process_module_source`, `_compute_state_age`. Also `build_stack_graphs` (per-stack units-in-stack Mermaid) |
 | `state_age.py` | Queries remote state backends for last-modified dates. Scoped to `remote_state.config` block to avoid matching provider block values. Resolves `${local.X}` interpolations via sibling HCL files |
+| `profiles.py` | Multi-account scanning. `build_unit_profile_map()` maps each unit → AWS profile: 1 profile short-circuits (all units, no STS); 2+ resolve each profile's account via `aws sts get-caller-identity` and each unit's account from its nearest `env.hcl` (`aws_account_id`, handling `get_env`/literal/`local.X`), then match. `state_bucket_profile()` picks the profile owning the state bucket (root.hcl `state_account_id`) for the cross-account state-age listing |
 | `report.py` | Writes a companion `_data.js` file and generates the HTML report that loads it via `<script src>`. Config flags injected via `%%PLACEHOLDER%%` substitution |
 | `tui.py` | Curses-based terminal viewer for JSON reports. Launched via `terrahawk view [report]`. Modes: list (grouped by env/sub, coverage bar, status/sub/tag/search filters, sort), detail (scrollable diffs with wrap toggle), plan (expandable per-resource diffs with action/type filters), module (tabular providers/inputs/outputs/tags), diagram (in-terminal or browser). Mouse and resize support |
 | `push.py` | Publishes the report triple (JSON + HTML + `_data.js`) to a Terrakettle server via `POST /api/v1/runs` (stdlib `urllib`, hand-rolled multipart, Bearer token). `maybe_push()` runs after the scan when `--push-url` is set; failures warn but never fail the scan |
@@ -253,7 +256,8 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 7. Discover units (rglob terragrunt.hcl); the repo-root "." unit is filtered out
 7b. Apply --unit filter (if --unit)
 8. Apply incremental filter (if --incremental)
-9. Query state ages (Azure Blob / AWS S3 / GCS)
+8b. Map units → AWS profiles (if --profile / aws_profiles); one report spans multiple accounts
+9. Query state ages (Azure Blob / AWS S3 / GCS) — under the state-bucket owner's profile when multi-account
 10. Extract root provider template
 11. Build DAG waves (if --dag; when the graph has no cross-unit edges, fall back to flat parallelism)
 12. Execute plans (ThreadPoolExecutor, wave-by-wave or all-at-once)
@@ -327,6 +331,8 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 **Config file parsing**: `.terrahawk.yml` is parsed with a simple line-by-line key-value parser — no PyYAML dependency. Only top-level scalar values are supported, plus the nested `unit_timeouts:` section.
 
 **Thread-based parallelism**: Plans run in a `ThreadPoolExecutor` because they're I/O-bound (subprocess calls). The GIL is not a bottleneck.
+
+**Multi-account profiles** (`--profile NAME`, repeatable; or `aws_profiles: a,b` in `.terrahawk.yml`): scan several AWS accounts into ONE report. `build_unit_profile_map()` (`profiles.py`) maps unit → profile by account; `cli.main()` stores it on `args.unit_profiles` and `worker.run_plan()` injects `AWS_PROFILE` into `plan_env` per unit (covers plan, init retry, render). A single profile applies to every unit with no STS calls; 2+ resolve profile↔account via `aws sts get-caller-identity` and unit↔account via `env.hcl`. Units whose account matches no profile fall back to the default credential chain (warned). The state-age listing runs once under `state_bucket_profile()` (the bucket owner). Replaces the old workaround of running terrahawk once per profile with `--exclude` and getting separate reports.
 
 **DAG execution**: Kahn's algorithm produces topological waves. Units within a wave run in parallel; waves run sequentially. Circular dependencies are caught and placed in a final wave.
 

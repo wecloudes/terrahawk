@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-03
+
+### Added
+
+- **Multi-account scanning — one report across several AWS accounts.** New `--profile NAME` flag (repeatable; or `aws_profiles: a,b` in `.terrahawk.yml`). With 2+ profiles, terrahawk maps each unit to the profile owning its account — resolving each profile's account via `aws sts get-caller-identity` and each unit's account from its nearest `env.hcl` (`aws_account_id`, handling `get_env`/literal/`local.X`) — then injects the right `AWS_PROFILE` into every unit's plan/init/render (`profiles.py`, `worker.py`). A single profile applies to all units with no STS calls. The one-shot state-age listing runs under the state-bucket owner's profile (`root.hcl` `state_account_id`). Replaces the old workaround of running once per profile with `--exclude` and stitching separate reports.
+- **Stack treeview in the HTML report.** Explicit-stack members now render as a collapsible, path-nested tree (`▤ <stack>` header with rollup status badges + unit count → `📁` folder rows for intermediate path segments → unit leaves under `├─`/`└─` guides) instead of flat blue-badge rows. Folders sort first (alphabetical), then leaf units. A section that is exactly one stack merges the group and stack headers into a single row. Leaf rows keep all per-unit affordances (status, badges, actions, expandable diff). Non-stack units still render flat.
+
+### Changed
+
+- **Discovery always skips hidden directories and module catalogs.** Any unit whose `rel_path` has a hidden segment (starts with `.`, e.g. `.migration-backup`, `.git`) or a `catalog` segment is dropped before `--exclude` (`_is_always_skipped()` in `discovery.py`). Terragrunt's own generated `.terragrunt-stack` / `.terragrunt-cache` dot-dirs are exempt (stack members are real units).
+- **Stack display names drop the trailing region segment.** `stackName` now uses the stack root's full rel_path minus a trailing region (`dum/production/eu-west-1` → `dum/production`, `shared/eu-west-1` → `shared`), so distinct stacks no longer all collapse to `eu-west-1` (`_stack_display_name()` in `process.py`).
+
 ## [1.6.1] - 2026-08-27
 
 ### Changed
