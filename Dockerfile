@@ -267,10 +267,13 @@ COPY terrahawk.py            /app/terrahawk.py
 COPY src/terrahawk/          /app/src/terrahawk/
 COPY THIRD_PARTY_LICENSES   /app/THIRD_PARTY_LICENSES
 
+# MISE_DATA_DIR / MISE_CACHE_DIR are deliberately unset: mise then follows
+# $HOME (~/.local/share/mise, ~/.cache/mise), which works both as the default
+# nonroot user and with the documented `--user "$(id -u):$(id -g)" -e HOME=/tmp`
+# run. Pinning them to /home/nonroot broke --terraform-version/--terragrunt-version
+# under --user (Permission denied).
 ENV TF_PLUGIN_CACHE_DIR=/cache/plugins \
     TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=true \
-    MISE_DATA_DIR=/home/nonroot/.local/share/mise \
-    MISE_CACHE_DIR=/home/nonroot/.cache/mise \
     MISE_YES=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
