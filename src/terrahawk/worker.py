@@ -50,6 +50,39 @@ def find_cache_dir(unit_dir):
     return best[1]
 
 
+# Provider/plugin failures worth one `init -upgrade` + re-plan. Mostly
+# symptoms of a corrupt or partially written provider cache.
+_RETRYABLE_INIT_ERRORS = (
+    "Failed to query available provider packages",
+    "Failed to install provider",
+    "plugins are not installed",
+    "Incompatible provider version",
+    "doesn't match any of the checksums",
+    "does not match any of the checksums",  # terraform's actual wording
+    "Failed to load plugin schemas",
+    "failed to instantiate provider",
+    "timeout while waiting for plugin to start",
+)
+
+
+def _is_retryable_init_error(output):
+    return any(e in output for e in _RETRYABLE_INIT_ERRORS)
+
+
+def _resolve_cache_dir(unit_dir, info):
+    """The unit's OpenTofu/Terraform working dir.
+
+    Prefers the exact `working_dir` reported by `terragrunt info print` (also
+    correct for units without a `terraform { source }`, which run in the unit
+    dir itself); falls back to the cache-tree scoring heuristic when info is
+    unavailable or the dir holds no .tf files.
+    """
+    wd = (info or {}).get("working_dir")
+    if wd and os.path.isdir(wd) and any(f.endswith(".tf") for f in os.listdir(wd)):
+        return wd
+    return find_cache_dir(unit_dir)
+
+
 def _resolve_timeout(unit_dir, default_timeout, unit_timeouts):
     """Pick a unit's plan timeout: the first `unit_timeouts` pattern that is a
     substring of `unit_dir` wins, otherwise the default."""
@@ -64,6 +97,53 @@ def _fetch_from_state_args(tg_version):
     if version_at_least(tg_version, TG_GRADUATED):
         return []
     return ["--dependency-fetch-output-from-state"]
+
+
+def _info_args(unit_dir, tg_version):
+    """`terragrunt info print` for one unit (working dir + binary).
+
+    Dependency outputs are skipped — they aren't needed here and would cost a
+    state read per dependency. Below 1.2 that flag sits behind the
+    `optional-dependency-outputs` experiment; if this terragrunt lacks it the
+    call fails and the caller falls back to the heuristic.
+    """
+    info_args = ["info", "print", f"--working-dir={unit_dir}", "--non-interactive",
+                 "--no-dependency-outputs"]
+    if not version_at_least(tg_version, TG_GRADUATED):
+        info_args.insert(2, "--experiment=optional-dependency-outputs")
+    return info_args
+
+
+def uses_provider_cache(env, tg_version, enabled=True):
+    """True when Terragrunt's provider cache server should be used (see
+    `_provider_cache_env`)."""
+    if env.get("TG_PROVIDER_CACHE", "1").lower() in ("0", "false"):
+        return False
+    return enabled and version_at_least(tg_version, (1, 0, 0))
+
+
+def _provider_cache_env(env, tg_version, enabled=True):
+    """Configure provider caching for the parallel per-unit plans. Mutates env.
+
+    Terraform's shared `plugin_cache_dir` is not safe for concurrent `init`:
+    on a cold cache (every fresh CI container) parallel units fail with
+    "Required plugins are not installed" and only recover through the
+    `init -upgrade` retry. Terragrunt's provider cache server serialises
+    downloads across processes with per-provider lock files, so it is the
+    default on Terragrunt 1.x. The plugin dir remains the fallback when
+    disabled (`--no-provider-cache`, or `TG_PROVIDER_CACHE=0` in the env) or
+    when the Terragrunt version is older/unknown.
+    """
+    if uses_provider_cache(env, tg_version, enabled):
+        env.setdefault("TG_PROVIDER_CACHE", "1")
+        # Terragrunt clears this for terraform anyway; drop it so the env is
+        # unambiguous (the Docker image sets it globally).
+        env.pop("TF_PLUGIN_CACHE_DIR", None)
+        env.pop("TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE", None)
+    else:
+        env["TF_PLUGIN_CACHE_DIR"] = os.path.expanduser("~/.terraform.d/plugin-cache")
+        env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "true"
+    return env
 
 
 def _build_plan_args(unit_dir, plan_file, no_hooks=False, tg_version=None):
@@ -104,9 +184,9 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     # Run terragrunt plan
     exit_code = 0
     plan_output = ""
-    plan_env = os.environ.copy()
-    plan_env["TF_PLUGIN_CACHE_DIR"] = os.path.expanduser("~/.terraform.d/plugin-cache")
-    plan_env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "true"
+    tg_version = getattr(args, "tg_version", None)
+    plan_env = _provider_cache_env(os.environ.copy(), tg_version,
+                                   not getattr(args, "no_provider_cache", False))
     # Multi-account: use the AWS profile mapped to this unit's account so plan,
     # init retry, and render all run with the right credentials.
     unit_profile = (getattr(args, "unit_profiles", None) or {}).get(rel_path)
@@ -115,7 +195,6 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
 
     tf_ver = getattr(args, "terraform_version", "")
     tg_ver = getattr(args, "terragrunt_version", "")
-    tg_version = getattr(args, "tg_version", None)
     # A pinned Terraform must be what terragrunt itself runs, not just what
     # terrahawk's own show/output calls use: put it on the mise PATH and
     # select it via TG_TF_PATH.
@@ -129,14 +208,6 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     plan_args = _build_plan_args(unit_dir, plan_file, getattr(args, "no_hooks", False), tg_version)
     plan_cmd = tg_cmd(plan_args)
 
-    retryable_errors = ["Failed to query available provider packages",
-                        "Failed to install provider",
-                        "plugins are not installed",
-                        "Incompatible provider version",
-                        "doesn't match any of the checksums",
-                        "Failed to load plugin schemas",
-                        "failed to instantiate provider",
-                        "timeout while waiting for plugin to start"]
     try:
         r = subprocess.run(plan_cmd, capture_output=True, text=True,
                            timeout=my_timeout, env=plan_env)
@@ -148,7 +219,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         # cache. This is local-only (provider binaries + .terraform.lock.hcl,
         # which cleanup restores from git); it never touches remote state, so
         # the scan stays read-only.
-        if exit_code != 0 and any(e in plan_output for e in retryable_errors):
+        if exit_code != 0 and _is_retryable_init_error(plan_output):
             subprocess.run(
                 tg_cmd([
                     "init", "-upgrade", "-input=false", "-no-color",
@@ -187,8 +258,18 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     except Exception:
         pass  # old terragrunt or render bug — consumers fall back to regex
 
-    # Find cache dir for optional tools
-    cache_dir = find_cache_dir(unit_dir)
+    # Terragrunt's own view of the unit: exact working dir and the
+    # OpenTofu/Terraform binary it resolved. Falls back to heuristics.
+    unit_info = {}
+    try:
+        r = subprocess.run(tg_cmd(_info_args(unit_dir, tg_version)),
+                           capture_output=True, text=True, timeout=60, env=plan_env)
+        if r.returncode == 0 and r.stdout.strip():
+            unit_info = json.loads(r.stdout)
+    except Exception:
+        pass  # older terragrunt / experiment unavailable — heuristic fallback
+
+    cache_dir = _resolve_cache_dir(unit_dir, unit_info)
     result["cache_dir"] = cache_dir
 
     if not cache_dir:
@@ -199,7 +280,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     # plan file and initialised cache_dir (terragrunt prefers tofu when it is
     # installed), and the same env — `show`/`output` read remote state, so a
     # multi-account unit needs its AWS_PROFILE here too.
-    tf_bin = resolve_tf_binary(result.get("render_json"), plan_env)
+    tf_bin = unit_info.get("terraform_binary") or resolve_tf_binary(result.get("render_json"), plan_env)
 
     # Plan JSON (structured resource changes, out-of-band drift, diagrams).
     # Captured for ANY completed plan: a clean plan (exit 0) can still carry

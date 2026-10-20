@@ -17,7 +17,7 @@ from .deps import (check_dependencies, engine_warnings, get_versions, parse_vers
                    strip_refresh_defeating_args)
 from .discovery import discover_units, build_dag, generate_stacks
 from .incremental import load_manifest, hash_file, save_manifest
-from .worker import run_plan
+from .worker import run_plan, uses_provider_cache
 from .process import process_result, build_stack_graphs
 from .state_age import query_blob_dates, extract_root_provider_template
 from .profiles import build_unit_profile_map, state_bucket_profile
@@ -73,6 +73,11 @@ def _parse_args(repo_root):
                         help="Skip before_hook/after_hook/error_hook blocks during plan for a pure read-only "
                              "drift scan (requires Terragrunt >=1.0.8; the 'optional-hooks' experiment flag is "
                              "added automatically below 1.2, where --no-hooks became GA)")
+    parser.add_argument("--no-provider-cache", action="store_true",
+                        default=config.get("no_provider_cache") == "true",
+                        help="Use Terraform's shared plugin cache dir instead of Terragrunt's provider cache "
+                             "server (default on Terragrunt 1.x). The plugin dir is not safe for parallel init "
+                             "on a cold cache; only use this if the cache server can't reach your registries")
     parser.add_argument("--no-stacks", action="store_true", default=config.get("no_stacks") == "true",
                         help="Skip `terragrunt stack generate` for terragrunt.stack.hcl files. By default stacks "
                              "are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x)")
@@ -440,6 +445,7 @@ def main():
   Tags        : {args.tags}
   Incremental : {args.incremental}
   DAG         : {args.dag}
+  Providers   : {'terragrunt provider cache' if uses_provider_cache(os.environ, args.tg_version, not args.no_provider_cache) else 'plugin cache dir'}
   HTML report : {html_report}
 """)
 

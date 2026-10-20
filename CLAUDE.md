@@ -89,6 +89,7 @@ After `terragrunt plan`, the worker (`worker.py`) collects additional data from 
 | Encoding-only changes | `plan_json.resource_changes[].change` before/after | `encoding_only_paths()` in `plan_parser.py`: when *every* known difference (ignoring `after_unknown` computed attrs) is a base64-gzip string decoding to identical bytes, the planResource gets `encodingOnly: [attr paths]` → `gz N` / `gz only` badge + per-resource "gzip re-encode only" tag (HTML), `[gzip re-encode only]` marker (TUI). Status stays `drift` (the action is real). Values are compared, never emitted |
 | Unit duration | `time.monotonic()` around plan + collection | `duration` field, console `(Ns)` suffix |
 | Rendered config | `terragrunt render --format json` (per unit, after plan) | Resolved module source, resolved input values (secret-named inputs masked), exact remote_state key for state age. Regex fallbacks remain for old terragrunt |
+| Working dir + binary | `terragrunt info print --no-dependency-outputs` (per unit, after plan) | Exact `working_dir` for `show`/`output` and `terraform_binary`; falls back to `find_cache_dir()` scoring (see Cache Directory Detection) |
 
 ### Provider Extraction
 
@@ -108,7 +109,9 @@ When a unit's cache directory is empty or incomplete, the **root provider templa
 
 ### Cache Directory Detection
 
-The `.terragrunt-cache` tree can contain multiple directories with `.tf` files (the actual module, examples, tests, submodules). `find_cache_dir()` in `worker.py` scores directories by:
+After the plan, the worker asks Terragrunt for the unit's exact working dir and resolved binary via `terragrunt info print --no-dependency-outputs` (`_info_args()`; below Terragrunt 1.2 the flag needs `--experiment=optional-dependency-outputs`, and dependency outputs are skipped because they'd cost a state read per dependency). `_resolve_cache_dir()` uses that `working_dir` when it exists and holds `.tf` files — this also covers units without `terraform { source }`, which run in the unit dir itself and have no `.terragrunt-cache`. `terraform_binary` from the same call is the first choice for the follow-up `show`/`output` binary. When `info print` fails (older terragrunt, experiment unknown), it falls back to the heuristic below.
+
+The `.terragrunt-cache` tree can contain multiple directories with `.tf` files (the actual module, examples, tests, submodules). The fallback `find_cache_dir()` in `worker.py` scores directories by:
 
 | Score | Criteria |
 |-------|----------|
@@ -261,7 +264,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 9. Query state ages (Azure Blob / AWS S3 / GCS) — under the state-bucket owner's profile when multi-account
 10. Extract root provider template
 11. Build DAG waves (if --dag; when the graph has no cross-unit edges, fall back to flat parallelism)
-12. Execute plans (ThreadPoolExecutor, wave-by-wave or all-at-once)
+12. Execute plans (ThreadPoolExecutor, wave-by-wave or all-at-once; Terragrunt provider cache unless --no-provider-cache)
 13. Process results (plan parsing, diagrams, tags, error classification, etc.)
 14. Merge incremental results from previous report
 15. Write JSON + manifest + HTML report
@@ -330,6 +333,8 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 **Backward compatibility**: `terrahawk.py` at repo root is a thin shim that inserts `src/` into `sys.path` and delegates to `terrahawk.cli:main`. The Dockerfile entrypoint (`python3 /app/terrahawk.py`) is unchanged. `python -m terrahawk` also works via `__main__.py`.
 
 **Config file parsing**: `.terrahawk.yml` is parsed with a simple line-by-line key-value parser — no PyYAML dependency. Only top-level scalar values are supported, plus the nested `unit_timeouts:` section.
+
+**Provider caching** (`--no-provider-cache` to opt out): units plan in parallel as separate `terragrunt` processes. Terraform's shared `plugin_cache_dir` (`TF_PLUGIN_CACHE_DIR`) is **not safe for concurrent init**: on a cold cache (every fresh CI container) parallel units corrupt each other's packages (`does not match any of the checksums`, `Required plugins are not installed`). A 12-unit spike on Terragrunt 1.1.6 / Terraform 1.16.6 errored on 10/12 units even with the `init -upgrade` retry. `_provider_cache_env()` (`worker.py`) therefore sets `TG_PROVIDER_CACHE=1` on Terragrunt ≥1.0: Terragrunt's provider cache server serialises downloads across processes with per-provider lock files under the shared temp dir, generates the lock files itself (cleanup still wipes them before the scan and restores them from git after), and clears `TF_PLUGIN_CACHE_DIR` for terraform. The worker also drops `TF_PLUGIN_CACHE_*` from the env (the Docker image sets them globally). The plugin dir is used when opted out (`--no-provider-cache`, `no_provider_cache: true`, or `TG_PROVIDER_CACHE=0`) or the Terragrunt version is older or unknown. The `init -upgrade` retry (`_RETRYABLE_INIT_ERRORS`) remains as a safety net. The startup banner shows the active mode.
 
 **Thread-based parallelism**: Plans run in a `ThreadPoolExecutor` because they're I/O-bound (subprocess calls). The GIL is not a bottleneck.
 

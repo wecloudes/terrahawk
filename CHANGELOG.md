@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-20
+
+### Changed
+
+- **Terragrunt's provider cache server replaces the shared Terraform plugin cache dir** (Terragrunt ≥1.0). Units plan in parallel as separate `terragrunt` processes, and `TF_PLUGIN_CACHE_DIR` is not safe for concurrent `init`. On a cold cache — every fresh CI container — parallel units corrupted each other's provider packages (`does not match any of the checksums`, `Required plugins are not installed`). In a 12-unit spike (Terragrunt 1.1.6 / Terraform 1.16.6) v1.7.x errored on **10/12 units** even with its `init -upgrade` retry; with the provider cache, 12/12 succeed. Terragrunt serialises downloads across processes with per-provider lock files. Opt out with `--no-provider-cache` / `no_provider_cache: true` (or `TG_PROVIDER_CACHE=0`); older or unknown Terragrunt keeps the plugin dir. The startup banner shows the active mode (`_provider_cache_env()` in `worker.py`).
+- **Working dir and binary come from `terragrunt info print`.** After each plan the worker reads the unit's exact `working_dir` and resolved `terraform_binary` from `terragrunt info print --no-dependency-outputs` (experiment-gated below 1.2; dependency outputs skipped so it costs no state reads). This replaces the `.terragrunt-cache` scoring heuristic, which stays as the fallback (`_resolve_cache_dir()`). Units without `terraform { source }` — which run in the unit dir and have no cache tree — now get state, outputs, tags and diagrams too; previously they were skipped.
+
+### Fixed
+
+- **The init retry never fired on checksum mismatches.** The retry list matched `doesn't match any of the checksums`, but Terraform prints `does not match any of the checksums`. Both spellings now match. The patterns moved to `_RETRYABLE_INIT_ERRORS`.
+
+### Tests
+
+- Provider-cache env selection (1.x default, opt-out, user `TG_PROVIDER_CACHE=0`, old/unknown Terragrunt, Docker's global plugin env dropped), `info print` args gating, working-dir resolution (info wins over a decoy, units without a source, heuristic fallback), `run_plan` using info's dir and binary, and retry matching against Terraform's verbatim checksum error. Suite is 186 tests.
+
 ## [1.7.2] - 2026-10-20
 
 ### Added

@@ -108,7 +108,7 @@ docker pull wecloudes/terrahawk:azure
 docker pull wecloudes/terrahawk:gcp
 
 # Or pin a release:
-docker pull wecloudes/terrahawk:aws-1.7.2
+docker pull wecloudes/terrahawk:aws-1.8.0
 ```
 
 Or build locally:
@@ -180,7 +180,7 @@ CLIs write token-cache files into them.
 ```
 usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
                  [--diagrams] [--tags] [--incremental] [--dag]
-                 [--exclude EXCLUDE] [--no-hooks] [--no-stacks] [--terraform-version VERSION]
+                 [--exclude EXCLUDE] [--no-hooks] [--no-provider-cache] [--no-stacks] [--terraform-version VERSION]
                  [--terragrunt-version VERSION] [--version]
 ```
 
@@ -196,6 +196,7 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `--dag` / `--no-dag` | `true` | Execute units in dependency order (topological waves); on by default |
 | `--exclude` | `""` | Regex pattern to exclude unit paths |
 | `--no-hooks` | `false` | Skip `before_hook`/`after_hook`/`error_hook` for a pure read-only drift scan (requires Terragrunt ≥1.0.8; GA in 1.2 — the `optional-hooks` experiment flag is added automatically on older versions) |
+| `--no-provider-cache` | `false` | Use Terraform's shared plugin cache dir instead of Terragrunt's provider cache server (default on Terragrunt 1.x). The plugin dir isn't safe for parallel `init` on a cold cache — only opt out if the cache server can't reach your registries |
 | `--no-stacks` | `false` | Skip `terragrunt stack generate` for `terragrunt.stack.hcl` files. By default stacks are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x) |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
@@ -296,6 +297,7 @@ diagram_assets: inline   # inline | sidecar — embed Mermaid in the HTML, or wr
 exclude: "bootstrapping|test"
 no_hooks: false    # skip before/after/error hooks (read-only drift scan)
 no_stacks: false   # skip auto `terragrunt stack generate` for terragrunt.stack.hcl
+no_provider_cache: false  # use TF_PLUGIN_CACHE_DIR instead of Terragrunt's provider cache
 
 # Publish the report to a Terrakettle server after each scan (optional).
 # The token is per-project; prefer the $TERRAKETTLE_TOKEN env var in CI.
