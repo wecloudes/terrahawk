@@ -5,6 +5,10 @@ assembly — the decision logic inside run_plan, exercised without spawning
 terragrunt.
 """
 
+import json
+import subprocess
+from types import SimpleNamespace
+
 from terrahawk import worker
 
 
@@ -79,3 +83,101 @@ class TestBuildPlanArgs:
         # inserted right after the "plan" subcommand
         assert args.index("--experiment=optional-hooks") == 1
         assert args.index("--no-hooks") == 2
+
+    def test_pre_1_2_keeps_experiment_flags(self):
+        args = worker._build_plan_args("/u", "/tmp/p.tfplan", no_hooks=True, tg_version=(1, 1, 6))
+        assert "--dependency-fetch-output-from-state" in args
+        assert args[1:3] == ["--experiment=optional-hooks", "--no-hooks"]
+
+    def test_1_2_drops_graduated_flags(self):
+        # Terragrunt 1.2: fetch-from-state is the default (flag deprecated,
+        # errors under strict mode); --no-hooks no longer needs the experiment.
+        args = worker._build_plan_args("/u", "/tmp/p.tfplan", no_hooks=True, tg_version=(1, 2, 0))
+        assert "--dependency-fetch-output-from-state" not in args
+        assert not any(a.startswith("--experiment") for a in args)
+        assert args.index("--no-hooks") == 1
+        assert "-lock=false" in args and "-detailed-exitcode" in args
+
+    def test_unknown_version_is_legacy_safe(self):
+        assert worker._fetch_from_state_args(None) == ["--dependency-fetch-output-from-state"]
+        assert worker._fetch_from_state_args((1, 3, 0)) == []
+
+
+class _FakeRun:
+    """Records subprocess.run calls and answers like terragrunt/terraform."""
+
+    def __init__(self, render_json):
+        self.calls = []
+        self.render_json = render_json
+
+    def __call__(self, cmd, **kw):
+        self.calls.append((cmd, kw))
+        out = ""
+        rc = 0
+        if "plan" in cmd:
+            # terragrunt writes the plan file and exits 2 (drift)
+            plan_out = next(a for a in cmd if a.startswith("-out="))[len("-out="):]
+            open(plan_out, "w").write("plan")
+            rc = 2
+        elif "render" in cmd:
+            out = json.dumps(self.render_json)
+        elif "show" in cmd or "output" in cmd:
+            out = json.dumps({"values": {"root_module": {"resources": [{}]}}})
+        return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+
+    def tf_calls(self):
+        return [(c, kw) for c, kw in self.calls if "show" in c or "output" in c]
+
+
+class TestRunPlanToolCalls:
+    def _unit(self, tmp_path):
+        unit = tmp_path / "acct-b" / "app"
+        mod = unit / ".terragrunt-cache" / "x" / "y"
+        mod.mkdir(parents=True)
+        (mod / "provider.tf").write_text("")
+        (mod / "main.tf").write_text("")
+        return unit
+
+    def _args(self, **kw):
+        base = dict(unit_profiles={}, terraform_version="", terragrunt_version="",
+                    no_hooks=False, tg_version=(1, 1, 6))
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def _run(self, tmp_path, monkeypatch, args, render_json=None):
+        for k in ("TG_TF_PATH", "TERRAGRUNT_TFPATH"):
+            monkeypatch.delenv(k, raising=False)
+        fake = _FakeRun(render_json or {})
+        monkeypatch.setattr(worker.subprocess, "run", fake)
+        unit = self._unit(tmp_path)
+        result = worker.run_plan(str(unit), "acct-b/app", 60, args, {}, str(tmp_path),
+                                 str(tmp_path), 0)
+        return fake, result
+
+    def test_show_and_output_get_unit_profile(self, tmp_path, monkeypatch):
+        args = self._args(unit_profiles={"acct-b/app": "acct-b-profile"})
+        fake, result = self._run(tmp_path, monkeypatch, args)
+        tf_calls = fake.tf_calls()
+        assert len(tf_calls) == 3  # show plan, show state, output
+        for _, kw in tf_calls:
+            assert kw["env"]["AWS_PROFILE"] == "acct-b-profile"
+        assert "plan_json" in result and "state_json" in result and "outputs_json" in result
+
+    def test_show_uses_unit_terraform_binary(self, tmp_path, monkeypatch):
+        fake, _ = self._run(tmp_path, monkeypatch, self._args(),
+                            render_json={"terraform_binary": "tofu"})
+        assert {c[0] for c, _ in fake.tf_calls()} == {"tofu"}
+
+    def test_pinned_terraform_reaches_terragrunt(self, tmp_path, monkeypatch):
+        args = self._args(terraform_version="1.16.6")
+        fake, _ = self._run(tmp_path, monkeypatch, args)
+        plan_cmd, plan_kw = next((c, kw) for c, kw in fake.calls if "plan" in c)
+        assert plan_cmd[:4] == ["mise", "exec", "terraform@1.16.6", "--"]
+        assert plan_kw["env"]["TG_TF_PATH"] == "terraform"
+        for cmd, _ in fake.tf_calls():
+            assert cmd[:3] == ["mise", "exec", "terraform@1.16.6"]
+
+    def test_render_drops_fetch_flag_on_1_2(self, tmp_path, monkeypatch):
+        fake, _ = self._run(tmp_path, monkeypatch, self._args(tg_version=(1, 2, 0)))
+        for cmd, _ in fake.calls:
+            assert "--dependency-fetch-output-from-state" not in cmd

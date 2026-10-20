@@ -5,7 +5,14 @@ import os
 import subprocess
 import time
 
-from .deps import mise_cmd
+from .deps import mise_cmd, pinned_tf_env, resolve_tf_binary, tf_cmd, version_at_least
+
+# Terragrunt 1.2 graduated the experiments terrahawk relies on: reading
+# dependency outputs straight from state is the default (the explicit flag is
+# deprecated and errors under strict mode) and `--no-hooks` no longer needs
+# `--experiment=optional-hooks` (passing it warns). Older or unknown versions
+# keep the explicit flags, which still work everywhere.
+TG_GRADUATED = (1, 2, 0)
 
 
 def find_cache_dir(unit_dir):
@@ -52,13 +59,21 @@ def _resolve_timeout(unit_dir, default_timeout, unit_timeouts):
     return default_timeout
 
 
-def _build_plan_args(unit_dir, plan_file, no_hooks=False):
+def _fetch_from_state_args(tg_version):
+    """`--dependency-fetch-output-from-state` for pre-1.2 Terragrunt only."""
+    if version_at_least(tg_version, TG_GRADUATED):
+        return []
+    return ["--dependency-fetch-output-from-state"]
+
+
+def _build_plan_args(unit_dir, plan_file, no_hooks=False, tg_version=None):
     """Assemble the `terragrunt plan` argument list for one unit.
 
-    `-detailed-exitcode` makes exit 2 mean drift; `-lock=false` and
-    `--dependency-fetch-output-from-state` keep the scan read-only and fast.
-    `no_hooks` prepends the experimental flags that skip before/after/error
-    hooks (requires Terragrunt >=1.0.8 with the experiment enabled).
+    `-detailed-exitcode` makes exit 2 mean drift; `-lock=false` and reading
+    dependency outputs from state keep the scan read-only and fast.
+    `no_hooks` inserts `--no-hooks` to skip before/after/error hooks
+    (Terragrunt >=1.0.8; below 1.2 it also needs the `optional-hooks`
+    experiment). *tg_version* is the parsed Terragrunt version tuple.
     """
     plan_args = [
         "plan", "-detailed-exitcode", "-input=false",
@@ -66,11 +81,12 @@ def _build_plan_args(unit_dir, plan_file, no_hooks=False):
         f"-out={plan_file}",
         f"--working-dir={unit_dir}",
         "--non-interactive",
-        "--dependency-fetch-output-from-state",
-    ]
+    ] + _fetch_from_state_args(tg_version)
     if no_hooks:
-        plan_args.insert(1, "--experiment=optional-hooks")
-        plan_args.insert(2, "--no-hooks")
+        hooks = ["--no-hooks"]
+        if not version_at_least(tg_version, TG_GRADUATED):
+            hooks.insert(0, "--experiment=optional-hooks")
+        plan_args[1:1] = hooks
     return plan_args
 
 
@@ -99,10 +115,19 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
 
     tf_ver = getattr(args, "terraform_version", "")
     tg_ver = getattr(args, "terragrunt_version", "")
+    tg_version = getattr(args, "tg_version", None)
+    # A pinned Terraform must be what terragrunt itself runs, not just what
+    # terrahawk's own show/output calls use: put it on the mise PATH and
+    # select it via TG_TF_PATH.
+    pinned_tf_env(args, plan_env)
+    tf_pin = [f"terraform@{tf_ver}"] if tf_ver else []
+
+    def tg_cmd(tool_args):
+        return mise_cmd("terragrunt", tg_ver, tool_args, extra=tf_pin)
 
     plan_file = os.path.join(tmp_dir, f"plan_{idx}.tfplan")
-    plan_args = _build_plan_args(unit_dir, plan_file, getattr(args, "no_hooks", False))
-    plan_cmd = mise_cmd("terragrunt", tg_ver, plan_args)
+    plan_args = _build_plan_args(unit_dir, plan_file, getattr(args, "no_hooks", False), tg_version)
+    plan_cmd = tg_cmd(plan_args)
 
     retryable_errors = ["Failed to query available provider packages",
                         "Failed to install provider",
@@ -125,7 +150,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         # the scan stays read-only.
         if exit_code != 0 and any(e in plan_output for e in retryable_errors):
             subprocess.run(
-                mise_cmd("terragrunt", tg_ver, [
+                tg_cmd([
                     "init", "-upgrade", "-input=false", "-no-color",
                     f"--working-dir={unit_dir}",
                 ]),
@@ -150,12 +175,11 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     # keys, real input values, and module source without regex parsing.
     try:
         r = subprocess.run(
-            mise_cmd("terragrunt", tg_ver, [
+            tg_cmd([
                 "render", "--format", "json",
                 f"--working-dir={unit_dir}",
                 "--non-interactive",
-                "--dependency-fetch-output-from-state",
-            ]),
+            ] + _fetch_from_state_args(tg_version)),
             capture_output=True, text=True, timeout=60, env=plan_env,
         )
         if r.returncode == 0 and r.stdout.strip():
@@ -171,6 +195,12 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
         result["duration"] = round(time.monotonic() - t_start, 1)
         return result
 
+    # Follow-up show/output calls must use the same binary that wrote the
+    # plan file and initialised cache_dir (terragrunt prefers tofu when it is
+    # installed), and the same env — `show`/`output` read remote state, so a
+    # multi-account unit needs its AWS_PROFILE here too.
+    tf_bin = resolve_tf_binary(result.get("render_json"), plan_env)
+
     # Plan JSON (structured resource changes, out-of-band drift, diagrams).
     # Captured for ANY completed plan: a clean plan (exit 0) can still carry
     # resource_drift entries — changes made outside Terraform with no pending
@@ -178,8 +208,8 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     if exit_code in (0, 2) and os.path.exists(plan_file):
         try:
             r = subprocess.run(
-                mise_cmd("terraform", tf_ver, [f"-chdir={cache_dir}", "show", "-json", plan_file]),
-                capture_output=True, text=True, timeout=30,
+                tf_cmd(tf_bin, tf_ver, [f"-chdir={cache_dir}", "show", "-json", plan_file]),
+                capture_output=True, text=True, timeout=30, env=plan_env,
             )
             if r.returncode == 0 and r.stdout.strip():
                 result["plan_json"] = json.loads(r.stdout)
@@ -189,8 +219,8 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     # Terraform show -json (single call for tags + resource count)
     try:
         r = subprocess.run(
-            mise_cmd("terraform", tf_ver, [f"-chdir={cache_dir}", "show", "-json"]),
-            capture_output=True, text=True, timeout=30,
+            tf_cmd(tf_bin, tf_ver, [f"-chdir={cache_dir}", "show", "-json"]),
+            capture_output=True, text=True, timeout=30, env=plan_env,
         )
         if r.returncode == 0 and r.stdout.strip():
             state = json.loads(r.stdout)
@@ -207,8 +237,8 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     # Outputs
     try:
         r = subprocess.run(
-            mise_cmd("terraform", tf_ver, [f"-chdir={cache_dir}", "output", "-json"]),
-            capture_output=True, text=True, timeout=30,
+            tf_cmd(tf_bin, tf_ver, [f"-chdir={cache_dir}", "output", "-json"]),
+            capture_output=True, text=True, timeout=30, env=plan_env,
         )
         if r.returncode == 0 and r.stdout.strip():
             result["outputs_json"] = json.loads(r.stdout)

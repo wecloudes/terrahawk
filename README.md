@@ -106,7 +106,7 @@ docker pull wecloudes/terrahawk:azure
 docker pull wecloudes/terrahawk:gcp
 
 # Or pin a release:
-docker pull wecloudes/terrahawk:aws-1.7.0
+docker pull wecloudes/terrahawk:aws-1.7.1
 ```
 
 Or build locally:
@@ -193,7 +193,7 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `--incremental` | `false` | Only re-scan changed units since the last report |
 | `--dag` / `--no-dag` | `true` | Execute units in dependency order (topological waves); on by default |
 | `--exclude` | `""` | Regex pattern to exclude unit paths |
-| `--no-hooks` | `false` | Skip `before_hook`/`after_hook`/`error_hook` for a pure read-only drift scan (Terragrunt experimental `optional-hooks`, requires Terragrunt ≥1.0.8) |
+| `--no-hooks` | `false` | Skip `before_hook`/`after_hook`/`error_hook` for a pure read-only drift scan (requires Terragrunt ≥1.0.8; GA in 1.2 — the `optional-hooks` experiment flag is added automatically on older versions) |
 | `--no-stacks` | `false` | Skip `terragrunt stack generate` for `terragrunt.stack.hcl` files. By default stacks are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x) |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |

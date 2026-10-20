@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import load_config, load_unit_timeouts, detect_config_dir
-from .deps import check_dependencies, get_versions
+from .deps import check_dependencies, get_versions, parse_version
 from .discovery import discover_units, build_dag, generate_stacks
 from .incremental import load_manifest, hash_file, save_manifest
 from .worker import run_plan
@@ -70,7 +70,8 @@ def _parse_args(repo_root):
     parser.add_argument("--exclude", type=str, default=config.get("exclude", ""))
     parser.add_argument("--no-hooks", action="store_true", default=config.get("no_hooks") == "true",
                         help="Skip before_hook/after_hook/error_hook blocks during plan for a pure read-only "
-                             "drift scan (Terragrunt experimental 'optional-hooks'; requires Terragrunt >=1.0.8)")
+                             "drift scan (requires Terragrunt >=1.0.8; the 'optional-hooks' experiment flag is "
+                             "added automatically below 1.2, where --no-hooks became GA)")
     parser.add_argument("--no-stacks", action="store_true", default=config.get("no_stacks") == "true",
                         help="Skip `terragrunt stack generate` for terragrunt.stack.hcl files. By default stacks "
                              "are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x)")
@@ -419,6 +420,9 @@ def main():
     config_dir = detect_config_dir(repo_root)
     unit_timeouts = load_unit_timeouts(repo_root)
     versions = get_versions(args)
+    # Parsed Terragrunt version gates flags that graduated from experiments
+    # (worker._build_plan_args); None when unknown → legacy flags are kept.
+    args.tg_version = parse_version(versions.get("terragrunt"))
 
     print(f"""
 \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557

@@ -52,8 +52,13 @@ ARG CLOUD=aws
 # 1.1.3 adds: provider-cache download hardening (secret URL segment),
 # --filter negation fixes (used by --affected), the iam_role self-assume
 # regression fix, and per-unit feature-flag defaults.
-ARG TERRAFORM_VERSION=1.16.0
-ARG TERRAGRUNT_VERSION=1.1.3
+# 1.1.5/1.1.6 add: backend assume_role on direct dependency state reads
+# (cross-account 403 fix — multi-account scans), fallback to `output -json`
+# when a direct state read fails, lower run memory. Avoid 1.1.4: its IMDSv2
+# change broke EC2 instance-role credentials inside containers.
+# terraform 1.16.6: HTTP/2 resource-exhaustion fix (CVE-2026-78669).
+ARG TERRAFORM_VERSION=1.16.6
+ARG TERRAGRUNT_VERSION=1.1.6
 ARG AWSCLI_VERSION=2.35.11
 ARG GCLOUD_VERSION=573.0.0
 

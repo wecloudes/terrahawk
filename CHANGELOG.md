@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-20
+
+### Changed
+
+- **Bumped pinned Terraform `1.16.0 → 1.16.6` and Terragrunt `1.1.3 → 1.1.6`** (Dockerfile). Terraform 1.16.6 fixes an HTTP/2 resource-exhaustion issue (CVE-2026-78669). Terragrunt 1.1.5+ chains the backend `assume_role` onto direct dependency state reads (previously cross-account reads failed with `403 AccessDenied` — hits multi-account scans) and falls back to `output -json` when a direct state read fails instead of failing the plan. 1.1.4 is skipped deliberately (EC2 instance-role credentials broke inside containers).
+- **Terragrunt 1.2 readiness — graduated experiment flags are version-gated.** The detected Terragrunt version is parsed once (`parse_version()` in `deps.py`, stored as `args.tg_version`). On 1.2+ terrahawk no longer passes `--dependency-fetch-output-from-state` (now the default; the flag is deprecated and errors under strict mode) or `--experiment=optional-hooks` with `--no-hooks` (GA; passing it warns). Older or undetectable versions keep the explicit flags.
+- **OpenTofu-only installs are accepted.** `check_dependencies()` now requires `terraform` *or* `tofu`, and the reported engine version is labelled `X.Y.Z (OpenTofu)` when tofu is in use.
+
+### Fixed
+
+- **Multi-account scans lost tags, resource counts, outputs and state diagrams for non-default accounts.** The worker's follow-up `show -json` / `output -json` calls read remote state but ran without the unit's environment, so the mapped `AWS_PROFILE` was dropped and they failed silently. They now run with the same `plan_env` as the plan.
+- **`show`/`output` used `terraform` even when Terragrunt planned with `tofu`.** Terragrunt prefers `tofu` when installed; the hardcoded `terraform` calls then mismatched the plan file and working dir, silently dropping the JSON plan (falling back to text parsing), state, and outputs. The binary is now resolved per unit with Terragrunt's own precedence (`TG_TF_PATH` → unit `terraform_binary` → `tofu` → `terraform`; `resolve_tf_binary()` in `deps.py`).
+- **`--terraform-version` did not pin the Terraform used by the plan.** Only terrahawk's own `show`/`output` calls ran the pinned build; `terragrunt plan` used whatever was on PATH. The terragrunt plan/init/render commands now run under `mise exec … terraform@X --` with `TG_TF_PATH=terraform` (an explicit user `TG_TF_PATH` is respected).
+
+### Tests
+
+- New `tests/test_deps.py` (version parsing, multi-tool mise pinning, binary resolution precedence, tofu-only dependency check, OpenTofu version labelling) and `run_plan` tool-call tests in `tests/test_worker.py` (unit profile reaches `show`/`output`, unit binary is used, pinned Terraform reaches terragrunt, 1.2 flag gating). Suite is 153 tests.
+
 ## [1.7.0] - 2026-09-03
 
 ### Added
