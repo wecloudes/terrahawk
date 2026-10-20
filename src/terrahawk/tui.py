@@ -616,7 +616,11 @@ def _format_detail(unit):
             lines.append((5, " Resource Changes"))
             for r in plan_resources:
                 ac = ACTION_COLORS.get(r.get("action", "?"), 7)
-                lines.append((ac, f"   {r.get('action', '?'):8s}  {r.get('address', '?')}"))
+                lines.append((ac, f"   {r.get('action', '?'):8s}  {r.get('address', '?')}{_enc_suffix(r)}"))
+            if any(r.get("encodingOnly") for r in plan_resources):
+                lines.append((7, ""))
+                lines.append((5, " gzip re-encode only = base64-gzip value changes but decodes to identical"))
+                lines.append((5, " content (Go 1.27 base64gzip encoder); the planned action is still real."))
             lines.append((7, ""))
             lines.append((5, " Plan Diff"))
             for r in plan_resources:
@@ -932,6 +936,11 @@ def _get_plan_types(plan_resources):
     return sorted(types)
 
 
+def _enc_suffix(resource):
+    """Marker for changes that only re-encode base64-gzip content."""
+    return "  [gzip re-encode only]" if resource.get("encodingOnly") else ""
+
+
 def _draw_plan(stdscr, unit, plan_rows, cursor, scroll, action_filter, type_filter, hscroll, wrap):
     h, w = stdscr.getmaxyx()
     stdscr.erase()
@@ -977,7 +986,7 @@ def _draw_plan(stdscr, unit, plan_rows, cursor, scroll, action_filter, type_filt
         arrow = "\u25BC" if pr["expanded"] else "\u25B6"
         has_body = bool(r.get("body"))
         prefix = f" {arrow} " if has_body else "   "
-        line = f"{prefix}{tag:12s} {r.get('type', ''):30s} {r.get('address', '?')}"
+        line = f"{prefix}{tag:12s} {r.get('type', ''):30s} {r.get('address', '?')}{_enc_suffix(r)}"
         display_lines.append((ri, "header", line, ac))
         if pr["expanded"] and r.get("body"):
             for bl in r["body"].splitlines():

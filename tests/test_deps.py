@@ -105,3 +105,38 @@ class TestDependencies:
         v = deps.get_versions(self._args())
         assert v == {"terragrunt": "v1.2.0-rc3", "terraform": "1.13.1 (OpenTofu)"}
         assert deps.parse_version(v["terragrunt"]) == (1, 2, 0)
+
+
+class TestRefreshGuard:
+    def test_strips_minimal_refresh_and_refresh_false(self):
+        env = {"TF_CLI_ARGS_plan": "-minimal-refresh -parallelism=20",
+               "TF_CLI_ARGS": "-refresh=false"}
+        removed = deps.strip_refresh_defeating_args(env)
+        assert sorted(removed) == [("TF_CLI_ARGS", "-refresh=false"),
+                                   ("TF_CLI_ARGS_plan", "-minimal-refresh")]
+        assert env == {"TF_CLI_ARGS_plan": "-parallelism=20"}  # emptied var dropped
+
+    @pytest.mark.parametrize("flag", ["--minimal-refresh", "-minimal-refresh=true",
+                                      "-refresh=FALSE", "-refresh=0"])
+    def test_flag_spellings(self, flag):
+        env = {"TF_CLI_ARGS_plan": flag}
+        assert deps.strip_refresh_defeating_args(env) == [("TF_CLI_ARGS_plan", flag)]
+
+    def test_harmless_values_untouched(self):
+        env = {"TF_CLI_ARGS_plan": "-refresh=true -minimal-refresh=false", "TF_CLI_ARGS_apply": "-refresh=false"}
+        assert deps.strip_refresh_defeating_args(env) == []
+        assert env["TF_CLI_ARGS_plan"] == "-refresh=true -minimal-refresh=false"
+        assert env["TF_CLI_ARGS_apply"] == "-refresh=false"  # not a plan
+
+    def test_unparseable_value_left_alone(self):
+        env = {"TF_CLI_ARGS": '-var "x=unterminated -refresh=false'}
+        assert deps.strip_refresh_defeating_args(env) == []
+
+
+class TestEngineWarnings:
+    def test_opentofu_1_13_0_warned(self):
+        assert any("1.13.1" in w for w in deps.engine_warnings({"terraform": "1.13.0 (OpenTofu)"}))
+
+    @pytest.mark.parametrize("engine", ["1.13.1 (OpenTofu)", "1.13.0", "n/a", ""])
+    def test_others_quiet(self, engine):
+        assert deps.engine_warnings({"terraform": engine}) == []

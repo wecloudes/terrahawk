@@ -13,7 +13,8 @@ from pathlib import Path
 
 from . import __version__
 from .config import load_config, load_unit_timeouts, detect_config_dir
-from .deps import check_dependencies, get_versions, parse_version
+from .deps import (check_dependencies, engine_warnings, get_versions, parse_version,
+                   strip_refresh_defeating_args)
 from .discovery import discover_units, build_dag, generate_stacks
 from .incremental import load_manifest, hash_file, save_manifest
 from .worker import run_plan
@@ -441,6 +442,14 @@ def main():
   DAG         : {args.dag}
   HTML report : {html_report}
 """)
+
+    # A drift scan must refresh every resource. Strip flags that defeat that
+    # from the inherited TF_CLI_ARGS* before any plan runs (children inherit).
+    for var, flag in strip_refresh_defeating_args(os.environ):
+        print(f"  \u26a0\ufe0f  Ignoring {flag} from {var}: it stops plan from refreshing every "
+              "resource, which hides out-of-band drift.")
+    for warning in engine_warnings(versions):
+        print(f"  \u26a0\ufe0f  {warning}")
 
     # Materialise explicit stacks (terragrunt.stack.hcl) so their units are
     # discoverable by `terragrunt find` and plannable by the worker. Auto-

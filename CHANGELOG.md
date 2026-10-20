@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-10-20
+
+### Added
+
+- **Encoding-only change detection.** Terragrunt 1.2 and OpenTofu 1.13 moved `base64gzip()` to the Go 1.27 gzip encoder, so values like `user_data_base64 = base64gzip(...)` change bytes without changing content — and with `user_data_replace_on_change` that plans a fleet-wide replacement. `encoding_only_paths()` (`plan_parser.py`) flags a planned update/replace when *every* known before/after difference (computed `after_unknown` attributes ignored) is a base64-gzip string that decompresses to identical content. Flagged resources carry `encodingOnly: [attribute paths]`; the HTML report shows a blue `gz N` / `gz only` unit badge and a "gzip re-encode only" tag in the plan popup, the TUI a `[gzip re-encode only]` marker. Status stays `drift` — the action is real; the report explains it. Values are compared, never emitted.
+- **Refresh guard.** `-refresh=false` and Terraform 1.17's new `-minimal-refresh` stop `plan` from refreshing every resource, hiding out-of-band drift. They are now stripped from an inherited `TF_CLI_ARGS` / `TF_CLI_ARGS_plan` at startup with a warning (`strip_refresh_defeating_args()` in `deps.py`). Flags injected through Terragrunt `extra_arguments` are out of reach.
+- **OpenTofu 1.13.0 warning.** `tofu show -json <planfile>` fails on 1.13.0 when ephemeral resources are present (fixed in 1.13.1), silently dropping affected units to text parsing without out-of-band drift. The scan now warns when it detects that engine (`engine_warnings()` in `deps.py`).
+
+### Changed
+
+- **Bumped pinned gcloud `573.0.0 → 589.0.0`** (gcp image) — newer `gcloud-crc32c` Go build, 8 → 7 critical CVEs.
+
+### Fixed
+
+- **Report tooltips broke on `for_each` addresses.** `esc()` in the HTML template did not escape `"`, so a `title="…"` containing an address like `aws_instance.web["a"]` (e.g. the `⚠ N ext` badge) was cut short. Double quotes are now escaped.
+
+### Tests
+
+- Encoding-only detection (identical vs different content, mixed changes, computed unknowns, nested paths, plain base64, JSON annotation), refresh-guard flag spellings and parsing, and engine warnings. Suite is 172 tests.
+
 ## [1.7.1] - 2026-10-20
 
 ### Changed

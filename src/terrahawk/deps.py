@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,56 @@ def parse_version(text):
 def version_at_least(version, minimum):
     """True when a parsed *version* tuple is >= *minimum*; False if unknown."""
     return version is not None and version >= minimum
+
+
+# Flags that stop `plan` from refreshing every resource, which hides
+# out-of-band drift — the thing a drift scan exists to find. `-refresh=false`
+# skips refresh entirely; Terraform 1.17's `-minimal-refresh` only refreshes
+# resources that already have proposed changes.
+_REFRESH_DEFEATING_RE = re.compile(
+    r"^--?(?:refresh=(?:false|f|0)|minimal-refresh(?:=(?:true|t|1))?)$", re.IGNORECASE)
+_TF_CLI_ARGS_VARS = ("TF_CLI_ARGS", "TF_CLI_ARGS_plan")
+
+
+def strip_refresh_defeating_args(env):
+    """Remove refresh-defeating flags from `TF_CLI_ARGS` / `TF_CLI_ARGS_plan`.
+
+    Mutates *env* (dropping a variable left empty) and returns the removed
+    `(var, flag)` pairs so the caller can warn. Values that don't parse as
+    shell words are left untouched. Flags injected through Terragrunt
+    `extra_arguments` blocks are out of reach here.
+    """
+    removed = []
+    for var in _TF_CLI_ARGS_VARS:
+        value = env.get(var)
+        if not value:
+            continue
+        try:
+            tokens = shlex.split(value)
+        except ValueError:
+            continue
+        drop = [t for t in tokens if _REFRESH_DEFEATING_RE.match(t)]
+        if not drop:
+            continue
+        removed += [(var, t) for t in drop]
+        kept = [t for t in tokens if not _REFRESH_DEFEATING_RE.match(t)]
+        if kept:
+            env[var] = shlex.join(kept)
+        else:
+            del env[var]
+    return removed
+
+
+def engine_warnings(versions):
+    """Warnings about known-broken OpenTofu/Terraform releases for a scan."""
+    engine = versions.get("terraform", "")
+    warnings = []
+    if "(OpenTofu)" in engine and parse_version(engine) == (1, 13, 0):
+        warnings.append(
+            "OpenTofu 1.13.0: `tofu show -json <planfile>` fails when ephemeral resources are "
+            "present (fixed in 1.13.1). Affected units fall back to text plan parsing and lose "
+            "out-of-band drift detection. Upgrade to >= 1.13.1.")
+    return warnings
 
 
 def uses_mise(args):

@@ -60,7 +60,7 @@ ARG CLOUD=aws
 ARG TERRAFORM_VERSION=1.16.6
 ARG TERRAGRUNT_VERSION=1.1.6
 ARG AWSCLI_VERSION=2.35.11
-ARG GCLOUD_VERSION=573.0.0
+ARG GCLOUD_VERSION=589.0.0
 
 # ============================================================
 # Stage: common binaries (mise, terraform, terragrunt)

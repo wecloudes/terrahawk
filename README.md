@@ -23,6 +23,8 @@ Designed to run on a daily schedule via CI/CD (GitHub Actions, GitLab CI, Azure 
 - **State Age** — Queries the remote state backend (Azure Blob, AWS S3, GCS) for last-modified dates. Informational blue badges showing days since last apply.
 - **Incremental Mode** (`--incremental`) — Only re-scans units whose `terragrunt.hcl` changed since the last report. Unchanged units are merged from the previous run.
 - **Dependency-Aware Execution** (on by default, `--no-dag` to disable) — Parses `dependency` blocks to build a DAG and executes units in topological waves, ensuring correct plan order. When there are no cross-unit dependencies it falls back to flat parallelism automatically.
+- **Encoding-Only Change Detection** — Planned changes whose only difference is a base64-gzip string that decodes to identical content (e.g. `user_data_base64 = base64gzip(...)` after Terragrunt 1.2 / OpenTofu 1.13 switched to the Go 1.27 gzip encoder) get a blue `gz` badge and a per-resource "gzip re-encode only" tag. The action still counts as drift — a replace-on-change will really replace the instance — but the report shows that the content didn't change. `base64gzip_compat()` keeps the old bytes.
+- **Full Refresh Enforced** — `-refresh=false` and Terraform 1.17's `-minimal-refresh` hide out-of-band drift, so they are stripped from an inherited `TF_CLI_ARGS` / `TF_CLI_ARGS_plan` (with a warning). Flags injected via Terragrunt `extra_arguments` are not touched.
 - **Error Taxonomy** — Failed units are classified (`config`, `auth`, `init`, `dependency`, `plan`, `timeout`) and the report shows a per-class breakdown, so failures are triageable at a glance instead of one undifferentiated "error" bucket.
 - **CI Gating** (`--fail-on drift|error`) — Exit non-zero (code `2`) when the scan finds drift or errors, so a scheduled scan can fail a pipeline. Default `never` (always exit `0`).
 - **Terragrunt Stacks** (auto, `--no-stacks` to disable) — Explicit stacks (`terragrunt.stack.hcl`) are auto-materialised via `terragrunt stack generate` before discovery, so their generated units are drift-scanned like any other unit. Stack units get a `▤ stack · <name>` badge, and each stack renders a **units-in-stack** Mermaid diagram (members coloured by status, intra-stack dependency edges) from a "▤ Stacks" chip bar. Generated trees are cleaned up afterwards. Requires Terragrunt 1.x.
@@ -106,7 +108,7 @@ docker pull wecloudes/terrahawk:azure
 docker pull wecloudes/terrahawk:gcp
 
 # Or pin a release:
-docker pull wecloudes/terrahawk:aws-1.7.1
+docker pull wecloudes/terrahawk:aws-1.7.2
 ```
 
 Or build locally:

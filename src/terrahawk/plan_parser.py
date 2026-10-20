@@ -1,7 +1,11 @@
 """Plan output parsing: extract structured resource changes from terraform plan text."""
 
+import base64
+import binascii
+import gzip
 import json
 import re
+import zlib
 
 _PLAN_ACTION_MAP = {
     "will be created":            "create",
@@ -156,6 +160,65 @@ def _redact_by_keyname(obj):
     return obj
 
 
+def _gzip_payload(value):
+    """Return the decompressed bytes if *value* is base64-encoded gzip, else None."""
+    if not isinstance(value, str) or len(value) < 24:
+        return None
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if raw[:2] != b"\x1f\x8b":  # gzip magic
+        return None
+    try:
+        return gzip.decompress(raw)
+    except (OSError, EOFError, zlib.error):
+        return None
+
+
+def _known_diffs(before, after, unknown, path=()):
+    """Yield (path, before, after) for every leaf whose planned value differs.
+
+    Attributes marked unknown in `after_unknown` are skipped: they are
+    computed values (ids, ARNs) that change *because* of a replacement, not
+    the reason for it.
+    """
+    if unknown is True:
+        return
+    if isinstance(before, dict) and isinstance(after, dict):
+        u = unknown if isinstance(unknown, dict) else {}
+        for k in sorted(set(before) | set(after)):
+            yield from _known_diffs(before.get(k), after.get(k), u.get(k), path + (k,))
+    elif isinstance(before, list) and isinstance(after, list) and len(before) == len(after):
+        u = unknown if isinstance(unknown, list) else []
+        for i, (b, a) in enumerate(zip(before, after)):
+            yield from _known_diffs(b, a, u[i] if i < len(u) else None, path + (i,))
+    elif before != after:
+        yield path, before, after
+
+
+def encoding_only_paths(change):
+    """Attribute paths of a change that only re-encodes gzip content.
+
+    Returns the dotted paths when *every* known difference between `before`
+    and `after` is a base64-gzip string whose decompressed content is
+    identical — e.g. `user_data_base64 = base64gzip(...)` after Terragrunt 1.2
+    / OpenTofu 1.13 moved to the Go 1.27 gzip encoder. The planned action is
+    still real (a replace-on-change will replace the instance); this only
+    explains *why*. Returns [] otherwise. Values are compared, never emitted.
+    """
+    before, after = change.get("before"), change.get("after")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    paths = []
+    for path, b, a in _known_diffs(before, after, change.get("after_unknown")):
+        pb, pa = _gzip_payload(b), _gzip_payload(a)
+        if pb is None or pb != pa:
+            return []
+        paths.append(".".join(str(x) for x in path))
+    return paths
+
+
 def parse_plan_resources_json(plan_json):
     """Build the same {address, type, action, body} entries from plan JSON.
 
@@ -179,12 +242,17 @@ def parse_plan_resources_json(plan_json):
             body_parts.append("before: " + json.dumps(before, indent=2, default=str))
         if after is not None:
             body_parts.append("after: " + json.dumps(after, indent=2, default=str))
-        resources.append({
+        entry = {
             "address": rc.get("address", "?"),
             "type": rc.get("type", ""),
             "action": action,
             "body": "\n".join(body_parts),
-        })
+        }
+        if action in ("update", "replace"):
+            enc = encoding_only_paths(change)
+            if enc:
+                entry["encodingOnly"] = enc
+        resources.append(entry)
     return resources
 
 

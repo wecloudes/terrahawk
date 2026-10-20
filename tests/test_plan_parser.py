@@ -128,3 +128,67 @@ class TestRedactByKeyname:
         # non-string value under a secret-ish key is left alone (no structural change)
         assert out["count"] == 3
         assert out["tokens"] == [1, 2]
+
+
+def _b64gz(text, **kw):
+    import base64
+    import gzip
+    return base64.b64encode(gzip.compress(text.encode(), **kw)).decode()
+
+
+class TestEncodingOnly:
+    """gzip re-encodings (e.g. Terragrunt 1.2's base64gzip encoder change)."""
+
+    SCRIPT = "#!/bin/bash\necho hello\n" * 20
+
+    def test_same_content_different_bytes(self):
+        before, after = _b64gz(self.SCRIPT, mtime=0), _b64gz(self.SCRIPT, mtime=1)
+        assert before != after
+        change = {"before": {"user_data_base64": before, "ami": "ami-1"},
+                  "after": {"user_data_base64": after, "ami": "ami-1"}}
+        assert plan_parser.encoding_only_paths(change) == ["user_data_base64"]
+
+    def test_different_content_is_real_change(self):
+        change = {"before": {"user_data_base64": _b64gz(self.SCRIPT)},
+                  "after": {"user_data_base64": _b64gz(self.SCRIPT + "echo bye\n")}}
+        assert plan_parser.encoding_only_paths(change) == []
+
+    def test_any_other_known_change_disqualifies(self):
+        change = {"before": {"user_data_base64": _b64gz(self.SCRIPT, mtime=0), "ami": "ami-1"},
+                  "after": {"user_data_base64": _b64gz(self.SCRIPT, mtime=1), "ami": "ami-2"}}
+        assert plan_parser.encoding_only_paths(change) == []
+
+    def test_computed_unknowns_are_ignored(self):
+        # A replacement makes id/arn unknown; they are consequences, not causes.
+        change = {"before": {"id": "i-123", "arn": "arn:x", "user_data_base64": _b64gz(self.SCRIPT, mtime=0)},
+                  "after": {"user_data_base64": _b64gz(self.SCRIPT, mtime=1)},
+                  "after_unknown": {"id": True, "arn": True}}
+        assert plan_parser.encoding_only_paths(change) == ["user_data_base64"]
+
+    def test_nested_paths(self):
+        change = {"before": {"launch_template": [{"user_data": _b64gz(self.SCRIPT, mtime=0)}]},
+                  "after": {"launch_template": [{"user_data": _b64gz(self.SCRIPT, mtime=1)}]}}
+        assert plan_parser.encoding_only_paths(change) == ["launch_template.0.user_data"]
+
+    def test_plain_base64_and_non_strings_not_flagged(self):
+        import base64
+        plain = {"before": {"v": base64.b64encode(b"a" * 40).decode()},
+                 "after": {"v": base64.b64encode(b"b" * 40).decode()}}
+        assert plan_parser.encoding_only_paths(plain) == []
+        assert plan_parser.encoding_only_paths({"before": {"n": 1}, "after": {"n": 2}}) == []
+        assert plan_parser.encoding_only_paths({"before": None, "after": {"a": 1}}) == []
+        assert plan_parser.encoding_only_paths({"before": {"a": 1}, "after": {"a": 1}}) == []
+
+    def test_parse_json_annotates_replace_not_create(self):
+        plan = {"resource_changes": [
+            {"address": "aws_instance.web", "type": "aws_instance",
+             "change": {"actions": ["delete", "create"],
+                        "before": {"user_data_base64": _b64gz(self.SCRIPT, mtime=0)},
+                        "after": {"user_data_base64": _b64gz(self.SCRIPT, mtime=1)}}},
+            {"address": "aws_s3_bucket.b", "type": "aws_s3_bucket",
+             "change": {"actions": ["create"], "before": None, "after": {"bucket": "b"}}},
+        ]}
+        res = {r["address"]: r for r in plan_parser.parse_plan_resources_json(plan)}
+        assert res["aws_instance.web"]["action"] == "replace"
+        assert res["aws_instance.web"]["encodingOnly"] == ["user_data_base64"]
+        assert "encodingOnly" not in res["aws_s3_bucket.b"]

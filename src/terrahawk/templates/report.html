@@ -8,6 +8,8 @@
 [data-theme="light"]{--bg:#fff;--surface:#f6f8fa;--border:#d0d7de;--text:#1f2328;--text-muted:#656d76;--text-dim:#8b949e;--green:#1a7f37;--green-bg:#dafbe1;--green-border:#aceebb;--red:#cf222e;--red-bg:#ffebe9;--red-border:#ffcecb;--yellow:#9a6700;--yellow-bg:#fff8c5;--yellow-border:#f5e0a0;--blue:#0969da;--blue-bg:#ddf4ff;--blue-border:#b6e3ff;--cyan:#0a8a7a;--orange:#bc4c00;--orange-bg:#fff1e5;--orange-border:#ffd8b5;--hover:#f0f2f5;--diff-add-bg:#dafbe1;--diff-add-text:#1a7f37;--diff-del-bg:#ffebe9;--diff-del-text:#cf222e;--diff-change-bg:#fff8c5;--diff-change-text:#9a6700}
 .state-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap}
 .oob-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow-border);cursor:help}
+.enc-badge{background:var(--blue-bg);color:var(--blue);border-color:var(--blue-border)}
+.enc-tag{font-size:10px;padding:0 5px;border-radius:6px;margin-left:6px;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border);cursor:help;white-space:nowrap}
 .stack-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:8px;white-space:nowrap;background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border);cursor:help}
 .stacks-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
 .stacks-bar .sb-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
@@ -480,7 +482,15 @@ function hl(raw){if(!raw)return'';return raw.split('\n').map(line=>{const t=line
   if(line.match(/->/))return`<span class="line-change">${esc(line)}</span>`;
   if(line.match(/will be |must be |has changed|is tainted|has been/))return`<span class="line-header">${esc(line)}</span>`;
   if(t.startsWith('Plan:'))return`<span class="line-header">${esc(line)}</span>`;return esc(line);}).join('\n');}
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+const ENC_NOTE='Gzip re-encoding only: the base64-gzip value changes but decodes to identical content (e.g. the Go 1.27 gzip encoder in Terragrunt 1.2 / OpenTofu 1.13 base64gzip(); base64gzip_compat() keeps the old bytes). The planned action is still real.';
+function encBadge(u){
+  const res=u.planResources||[];const enc=res.filter(r=>r.encodingOnly);if(!enc.length)return'';
+  const all=enc.length===res.length;
+  const det=enc.slice(0,8).map(r=>`${r.address}: ${r.encodingOnly.join(', ')}`).join('\n')+(enc.length>8?`\n\u2026and ${enc.length-8} more`:'');
+  const head=`${enc.length} of ${res.length} planned change(s)`;
+  return `<span class="oob-badge enc-badge" title="${esc(head+'\n'+ENC_NOTE+'\n'+det)}">gz ${all?'only':enc.length}</span>`;
+}
 function fp(u,q){const p=u.split('/');let r=`<span class="path-prefix">${esc(p.slice(0,3).join('/')+'/')}</span><span class="app-name">${esc(p.slice(3).join('/'))}</span>`;if(q){const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');r=r.replace(/>([^<]*)</g,(m,t)=>'>'+t.replace(re,'<mark class="hl">$1</mark>')+'<');}return r;}
 function openInfo(title,html,compact){const box=document.querySelector('#info-modal .modal-box');box.classList.toggle('modal-compact',!!compact);document.getElementById('info-title').innerHTML=title;document.getElementById('info-body').innerHTML=html;document.getElementById('info-modal').classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
@@ -556,7 +566,7 @@ function renderPlanTable(idx){
       const caret=hasBody?'<span class="plan-caret">\u25B6</span>':'<span class="plan-caret"></span>';
       const rowClass=hasBody?'plan-row':'';
       const onClick=hasBody?` onclick="togglePlanBody('${rid}',this)"`:'';
-      h+=`<tr class="${rowClass}"${onClick}><td style="width:14px">${caret}</td><td><span class="plan-act ${actCls[r.action]||''}">${actLbl[r.action]||r.action}</span></td><td class="plan-type">${esc(r.type)}</td><td class="plan-addr">${esc(r.address)}</td></tr>`;
+      h+=`<tr class="${rowClass}"${onClick}><td style="width:14px">${caret}</td><td><span class="plan-act ${actCls[r.action]||''}">${actLbl[r.action]||r.action}</span></td><td class="plan-type">${esc(r.type)}</td><td class="plan-addr">${esc(r.address)}${r.encodingOnly?`<span class="enc-tag" title="${esc(ENC_NOTE+'\nAttributes: '+r.encodingOnly.join(', '))}">gzip re-encode only</span>`:''}</td></tr>`;
       if(hasBody){
         h+=`<tr class="plan-body-row" id="${rid}"><td colspan="4"><pre class="diff-content" onclick="togglePlanBody('${rid}')">${hl(r.body)}</pre></td></tr>`;
       }
@@ -764,6 +774,7 @@ function render(){
       // Out-of-band drift badge (resources changed outside Terraform)
       const oob=u.driftedResources||[];
       if(oob.length){const names=oob.slice(0,8).map(r=>`${r.address} (${(r.actions||[]).join(',')})`).join('\n');const more=oob.length>8?`\n…and ${oob.length-8} more`:'';html+=`<span class="oob-badge" title="Changed outside Terraform:\n${esc(names+more)}">⚠ ${oob.length} ext</span>`;}
+      html+=encBadge(u);
       // HCL hygiene badges
       const hcl=u.hclIssues||[];
       if(hcl.length){const det=hcl.slice(0,5).map(i=>`${i.file}:${i.line||'?'} ${i.summary}`).join('\n');html+=`<span class="oob-badge" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" title="HCL validation:\n${esc(det)}">hcl ${hcl.length}</span>`;}
@@ -808,6 +819,7 @@ function unitLeaf(u,uid,indent,label){
   if(u.duration!=null)html+=`<span class="dur-badge" title="Scan duration">${Math.round(u.duration)}s</span>`;
   const oob=u.driftedResources||[];
   if(oob.length){const names=oob.slice(0,8).map(r=>`${r.address} (${(r.actions||[]).join(',')})`).join('\n');const more=oob.length>8?`\n\u2026and ${oob.length-8} more`:'';html+=`<span class="oob-badge" title="Changed outside Terraform:\n${esc(names+more)}">\u26A0 ${oob.length} ext</span>`;}
+  html+=encBadge(u);
   const hcl=u.hclIssues||[];
   if(hcl.length){const det=hcl.slice(0,5).map(i=>`${i.file}:${i.line||'?'} ${i.summary}`).join('\n');html+=`<span class="oob-badge" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" title="HCL validation:\n${esc(det)}">hcl ${hcl.length}</span>`;}
   if((u.unformattedFiles||[]).length)html+=`<span class="oob-badge" title="Needs formatting:\n${esc(u.unformattedFiles.join('\n'))}">fmt</span>`;
