@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-10-20
+
 ### Fixed
 
 - **`--terraform-version` / `--terragrunt-version` failed in the documented Docker run.** The image hard-coded `MISE_DATA_DIR` / `MISE_CACHE_DIR` under `/home/nonroot`, which the recommended `--user "$(id -u):$(id -g)" -e HOME=/tmp` run cannot write (`Permission denied`), so mise could not install the pinned tool and every unit errored. Both are now unset so mise follows `$HOME`. Verified in-container: a module requiring `= 1.15.6` scans clean with `--terraform-version 1.15.6` under both `--user` and the default nonroot user, and still fails without the pin.
