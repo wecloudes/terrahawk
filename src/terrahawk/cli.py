@@ -14,8 +14,8 @@ from pathlib import Path
 from . import __version__
 from .config import load_config, load_unit_timeouts, detect_config_dir
 from .deps import (check_dependencies, engine_warnings, get_versions, parse_version,
-                   strip_refresh_defeating_args)
-from .discovery import discover_units, build_dag, generate_stacks
+                   strip_refresh_defeating_args, version_at_least)
+from .discovery import discover_units, build_dag, generate_stacks, unit_path_filters
 from .incremental import load_manifest, hash_file, save_manifest
 from .worker import run_plan, uses_provider_cache
 from .process import process_result, build_stack_graphs
@@ -470,8 +470,19 @@ def main():
     # Discover units
     print("\U0001f4cb Discovering units...")
     filter_expr = f"[{args.affected}...HEAD]" if args.affected else None
+    # --unit pre-narrowing (Terragrunt >= 1.2): pass the needle's candidate
+    # unit paths as find --filter path expressions so terragrunt skips most
+    # of the filesystem walk. Same match rule as the post-filter below, so
+    # the selected units are identical — only discovery is faster. Skipped
+    # under --affected (git + path filters would union, widening the set).
+    unit_filters = None
+    if args.unit and not filter_expr and version_at_least(args.tg_version, (1, 2, 0)):
+        unit_filters = unit_path_filters(config_dir, args.unit)
+        if unit_filters:
+            print(f"  --unit: narrowing discovery to {len(unit_filters)} candidate path(s)")
     try:
-        units, native_deps = discover_units(config_dir, args.exclude, args.terragrunt_version, filter_expr)
+        units, native_deps = discover_units(
+            config_dir, args.exclude, args.terragrunt_version, filter_expr, unit_filters)
     except RuntimeError as e:
         print(f"  ❌ {e}")
         sys.exit(1)

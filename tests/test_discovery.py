@@ -1,6 +1,7 @@
 """Unit tests for terrahawk.discovery (pure DAG builder + filesystem helpers)."""
 
 import os
+import subprocess
 
 import pytest
 
@@ -136,3 +137,109 @@ class TestBuildDag:
         waves = discovery.build_dag(units, deps=deps)
         # cycle members can't be topologically ordered; they land in a trailing wave
         assert set(waves[-1]) == {"/a", "/b"}
+
+
+class TestUnitPathFilters:
+    """--unit pre-narrowing: candidate path filters for `terragrunt find`."""
+
+    def _tree(self, tmp_path):
+        for rel in ("prod/westeurope/app-gateway", "prod/northeurope/app-gateway",
+                    "shared/vpc", "dev/vpc"):
+            d = tmp_path / rel
+            d.mkdir(parents=True)
+            (d / "terragrunt.hcl").write_text("")
+
+    def test_exact_and_suffix_matches(self, tmp_path):
+        self._tree(tmp_path)
+        # exact rel_path
+        assert discovery.unit_path_filters(tmp_path, "shared/vpc") == ["./shared/vpc"]
+        # suffix matches every unit of that name, wherever it lives
+        assert discovery.unit_path_filters(tmp_path, "app-gateway") == [
+            "./prod/northeurope/app-gateway", "./prod/westeurope/app-gateway"]
+        # a bare name matching nothing narrows to nothing (None -> full discovery)
+        assert discovery.unit_path_filters(tmp_path, "nope") is None
+
+    def test_strips_and_rejects_needles(self, tmp_path):
+        self._tree(tmp_path)
+        assert discovery.unit_path_filters(tmp_path, "/shared/vpc/") == ["./shared/vpc"]
+        assert discovery.unit_path_filters(tmp_path, "") is None
+        assert discovery.unit_path_filters(tmp_path, None) is None
+        assert discovery.unit_path_filters(tmp_path, "/") is None
+
+    def test_root_config_and_cache_pruned(self, tmp_path):
+        (tmp_path / "terragrunt.hcl").write_text("")          # root — never a unit
+        stack = tmp_path / "stack" / ".terragrunt-stack" / "services" / "api"
+        stack.mkdir(parents=True)
+        (stack / "terragrunt.hcl").write_text("")             # stack member — real unit
+        cache = tmp_path / "prod" / ".terragrunt-cache" / "xyz" / "app-gateway"
+        cache.mkdir(parents=True)
+        (cache / "terragrunt.hcl").write_text("")             # cache — pruned from the walk
+
+        filters = discovery.unit_path_filters(tmp_path, "api")
+        assert filters == ["./stack/.terragrunt-stack/services/api"]
+        # the walk never descends into .terragrunt-cache: a needle matching only
+        # a cache path finds nothing
+        assert discovery.unit_path_filters(tmp_path, "app-gateway") is None
+
+    def test_duplicate_matches_deduped(self, tmp_path):
+        self._tree(tmp_path)
+        # exact + suffix can't both apply to different files, but the same
+        # rel_path produced twice (impossible via os.walk) is guarded by set()
+        filters = discovery.unit_path_filters(tmp_path, "vpc")
+        assert sorted(filters) == ["./dev/vpc", "./shared/vpc"]
+
+
+class TestDiscoverNativeUnitFilters:
+    """`--filter` path expressions reach the find command, and a rejected
+    filter retries unfiltered instead of falling back to rglob."""
+
+    @staticmethod
+    def _make_find(monkeypatch, tmp_path, responses):
+        """responses: list of (rc, stdout) answered in order per invocation."""
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            rc, out = responses[len(calls) - 1] if len(calls) <= len(responses) else responses[-1]
+            return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+
+        monkeypatch.setattr(discovery.subprocess, "run", fake_run)
+        return calls
+
+    UNIT_JSON = '[{"type": "unit", "path": "prod/app", "dependencies": []}]'
+
+    def test_unit_filters_passed_as_repeated_filter_flags(self, monkeypatch, tmp_path):
+        calls = self._make_find(monkeypatch, tmp_path, [(0, self.UNIT_JSON)])
+        units, deps = discovery.discover_units(
+            tmp_path, tg_ver="", filter_expr=None,
+            unit_filters=["./prod/app", "./dev/vpc"])
+        assert [rp for _, rp in units] == ["prod/app"]
+        joined = " ".join(calls[0])
+        assert "--filter=./prod/app" in joined and "--filter=./dev/vpc" in joined
+
+    def test_rejected_filter_retries_unfiltered(self, monkeypatch, tmp_path):
+        calls = self._make_find(monkeypatch, tmp_path,
+                                [(1, ""),                      # narrowed find fails
+                                 (0, self.UNIT_JSON)])         # retry without filters
+        units, deps = discovery.discover_units(
+            tmp_path, tg_ver="", filter_expr=None, unit_filters=["./prod/we|rd"])
+        assert [rp for _, rp in units] == ["prod/app"]
+        assert len(calls) == 2
+        assert "--filter" not in " ".join(calls[1])
+        # deps survived the retry: native discovery, not the rglob fallback
+        assert deps is not None
+
+    def test_no_filters_single_invocation(self, monkeypatch, tmp_path):
+        calls = self._make_find(monkeypatch, tmp_path, [(0, self.UNIT_JSON)])
+        discovery.discover_units(tmp_path)
+        assert len(calls) == 1
+
+    def test_double_failure_falls_back_to_rglob(self, monkeypatch, tmp_path):
+        (tmp_path / "dev" / "app").mkdir(parents=True)
+        (tmp_path / "dev" / "app" / "terragrunt.hcl").write_text("")
+        calls = self._make_find(monkeypatch, tmp_path, [(1, ""), (1, "")])
+        units, deps = discovery.discover_units(
+            tmp_path, tg_ver="", filter_expr=None, unit_filters=["./prod/app"])
+        assert [rp for _, rp in units] == ["dev/app"]
+        assert deps is None  # rglob fallback
+        assert len(calls) == 2
