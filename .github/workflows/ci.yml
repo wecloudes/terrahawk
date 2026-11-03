@@ -8,7 +8,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, which has no setup-python build of 3.9
+    # (our minimum). 24.04 still does; bump when the 3.9 floor is raised.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
