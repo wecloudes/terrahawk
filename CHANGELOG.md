@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-11-03
+
+### Changed
+
+- **HTML report themes.** The dark/light toggle became a theme menu with four choices: Dark, Light, **Tokyo Night** and **Cyberpunk** (the latter with display/mono font faces and neon accents). Theme choice persists in `localStorage`, syncs across open tabs via the `storage` event, and `?theme=<name>` on the report URL opens it in a specific theme (read before first paint to avoid a flash). The eagle logo is now rendered as a CSS mask (`--eagle-mask`/`--eagle-color`) so each theme tints — or gradient-tints — it natively instead of `filter:invert(1)`, and every hard-coded `font-family` moved to `--font-sans`/`--font-mono` variables. Mermaid diagrams re-init their theme on every modal render.
+
+- **Bumped pinned gcloud `589.0.0 → 591.0.0`** (Dockerfile, gcp image). 589.0.0 shipped a `gcloud-crc32c` built with Go 1.26.6, carrying 2 critical CVEs (CVE-2026-56857 / CVE-2026-78663, both fixed in Go 1.26.9) that tripped the image scan gate; 591.0.0 rebuilds it with Go 1.27.2.
+
+- **Bumped pinned Terraform `1.16.6 → 1.17.1` and Terragrunt `1.1.6 → 1.2.1`** (Dockerfile). Both are compiled with Go builds that fix CVE-2026-111943 (`crypto/x509` rejects chains through a set of compromised eMudhra intermediate CAs) — the primary lever for the image CVE count, since most of it lives in these precompiled binaries. Terraform 1.17 adds `-minimal-refresh` (already stripped by terrahawk's refresh guard) and variables/locals in provider requirements; 1.17.1 fixes `fmt` and policy-evaluation bugs. Terragrunt 1.2 graduates every experiment terrahawk gates on (`TG_GRADUATED`), speeds up shared-config parsing dramatically (a `common.hcl` read via `read_terragrunt_config` parses once instead of per unit — 5,000-unit repos: 34.2s → 1.88s discovery, ~95% less memory), and narrows the discovery walk for `--filter` path expressions.
+- **`--unit` scans discover faster on Terragrunt ≥ 1.2.** A bare `--unit` value can match a unit anywhere (suffix match), which cannot narrow Terragrunt's walk by itself. Terrahawk now pre-globs `terragrunt.hcl` with a cheap filesystem walk (no HCL parsing, `.terragrunt-cache` pruned), applies the same exact/suffix match the post-filter uses, and passes the candidate paths as `--filter` expressions so Terragrunt 1.2+ skips most of the walk (`unit_path_filters()` in `discovery.py`). Selected units are identical, only discovery is faster. Skipped under `--affected` (git + path filters would union, widening the set), and on pre-1.2 Terragrunt. If Terragrunt rejects the path filters (odd characters in a directory name), the find is retried unfiltered — never a silent fallback to the rglob path.
+
+### Notes
+
+- **Terragrunt 1.2's `base64gzip()` now uses the Go 1.27 gzip encoder**, so the encoded value changes while the decoded content stays identical. The first scan after upgrading may plan re-encodes on resources like `aws_instance.user_data_base64` — when the decoded bytes match, terrahawk's encoding-only detection already badges these as `gz only` (v1.7.2). Terragrunt 1.2 also stops adding a `RootAccess` statement when bootstrapping S3 state buckets (existing buckets keep it).
+
 ## [1.8.1] - 2026-10-20
 
 ### Fixed

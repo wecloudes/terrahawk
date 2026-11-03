@@ -9,7 +9,7 @@ module introspection, resource tagging, and state age tracking.
 Made with <3 by WeCloud.
 """
 
-__version__ = "1.8.1"
+__version__ = "1.8.2"
 
 from .cli import main
 

@@ -61,10 +61,13 @@ ARG CLOUD=aws
 # `-minimal-refresh` (already stripped by terrahawk's refresh guard) and
 # variables/locals in provider requirements; 1.17.1 fixes fmt and policy
 # evaluation bugs.
+# gcloud 591.0.0: gcloud-crc32c is rebuilt with Go 1.27.2 — 589.0.0 shipped a
+# Go 1.26.6 build carrying 2 critical CVEs (CVE-2026-56857 / CVE-2026-78663,
+# both fixed in Go 1.26.9), which tripped the scan gate on the gcp image.
 ARG TERRAFORM_VERSION=1.17.1
 ARG TERRAGRUNT_VERSION=1.2.1
 ARG AWSCLI_VERSION=2.35.11
-ARG GCLOUD_VERSION=589.0.0
+ARG GCLOUD_VERSION=591.0.0
 
 # ============================================================
 # Stage: common binaries (mise, terraform, terragrunt)
