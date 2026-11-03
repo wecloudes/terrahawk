@@ -108,7 +108,7 @@ docker pull wecloudes/terrahawk:azure
 docker pull wecloudes/terrahawk:gcp
 
 # Or pin a release:
-docker pull wecloudes/terrahawk:aws-1.8.2
+docker pull wecloudes/terrahawk:aws-1.8.3
 ```
 
 Or build locally:

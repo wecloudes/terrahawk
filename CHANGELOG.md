@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-11-03
+
+### Fixed
+
+- **`--unit` narrowing could change the outcome.** When Terragrunt accepted the `--filter` path expressions but they matched no unit, discovery reported "No unit found" instead of retrying; the unfiltered retry now also fires on an empty filtered result. Candidate globbing (`unit_path_filters()`) now follows symlinks (with ancestor-cycle pruning), so symlinked units are no longer filtered out when another unit matches.
+- **Broad `--unit` needles no longer build huge commands.** Above 50 candidates (`MAX_UNIT_FILTERS`) narrowing is skipped and discovery runs unfiltered.
+- **A timed-out `terragrunt find` is not retried.** Previously a filtered find that hit the 120s timeout ran a second full find before falling back to the glob path.
+- **`?theme=` is validated.** Unknown values from the URL or `localStorage` are ignored before first paint (an invalid `?theme=` no longer overrides a valid saved theme).
+
+### Tests
+
+- Filtered-empty retry, no retry after timeout or on an unfiltered empty result, symlinked unit candidates (alias + real dir both kept, cycle terminates), and the report's first-paint theme whitelist staying in sync with the theme menu. Suite is 201 tests.
+
 ## [1.8.2] - 2026-11-03
 
 ### Changed
