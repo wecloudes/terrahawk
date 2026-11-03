@@ -67,12 +67,19 @@ _ERROR_CLASS_RULES = [
 def _classify_error(status, error_text):
     """Classify a failed unit into a coarse error taxonomy string.
 
-    Returns one of: timeout, auth, init, dependency, config, plan, other.
+    Returns one of: throttled, timeout, auth, init, dependency, config, plan,
+    other.
     Non-error/non-timeout units return "". Matching is case-insensitive and
     order-sensitive (first rule that matches wins).
     """
     if status not in ("error", "timeout"):
         return ""
+
+    # Provider API rate limiting (still failing after the worker's backoff
+    # retries) — checked first: throttle errors often also mention auth-ish
+    # words ("signature", "credentials") in the provider's retry log.
+    if status == "error" and plan_parser.is_throttled(error_text):
+        return "throttled"
 
     text = (error_text or "").lower()
 
@@ -685,6 +692,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
         "stateAgeDays": state_age_days,
         "duration": raw.get("duration"),
         "driftedResources": drifted_resources,
+        "throttleRetries": raw.get("throttle_retries", 0),
     }
 
 

@@ -283,3 +283,54 @@ class TestRunPlanToolCalls:
         _, plan_kw = next((c, kw) for c, kw in fake.calls if "plan" in c)
         assert plan_kw["env"]["TG_PROVIDER_CACHE"] == "1"
         assert "TF_PLUGIN_CACHE_DIR" not in plan_kw["env"]
+
+
+class TestThrottleRetry:
+    """Provider API rate limiting: back off and re-plan instead of erroring."""
+
+    THROTTLED = "Error: reading EC2: ThrottlingException: Rate exceeded"
+
+    def _run(self, tmp_path, monkeypatch, plan_answers, retries=2, timeout=600):
+        for k in ("TG_TF_PATH", "TERRAGRUNT_TFPATH", "TG_PROVIDER_CACHE"):
+            monkeypatch.delenv(k, raising=False)
+        unit = tmp_path / "u"
+        unit.mkdir()
+        plans = []
+
+        def fake_run(cmd, **kw):
+            if "plan" in cmd:
+                rc, out = plan_answers[min(len(plans), len(plan_answers) - 1)]
+                plans.append(cmd)
+                return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+        sleeps = []
+        monkeypatch.setattr(worker.subprocess, "run", fake_run)
+        monkeypatch.setattr(worker.time, "sleep", sleeps.append)
+        args = SimpleNamespace(unit_profiles={}, terraform_version="", terragrunt_version="",
+                               no_hooks=False, tg_version=(1, 2, 1), throttle_retries=retries)
+        result = worker.run_plan(str(unit), "u", timeout, args, {}, str(tmp_path), str(tmp_path), 0)
+        return result, plans, sleeps
+
+    def test_throttled_plan_is_retried_until_success(self, tmp_path, monkeypatch):
+        result, plans, sleeps = self._run(
+            tmp_path, monkeypatch, [(1, self.THROTTLED), (2, "Plan: 1 to add")])
+        assert result["exit_code"] == 2 and result["throttle_retries"] == 1
+        assert len(plans) == 2 and len(sleeps) == 1 and sleeps[0] >= 15
+
+    def test_retries_are_bounded(self, tmp_path, monkeypatch):
+        result, plans, sleeps = self._run(tmp_path, monkeypatch, [(1, self.THROTTLED)], retries=2)
+        assert result["exit_code"] == 1 and result["throttle_retries"] == 2 and len(plans) == 3
+
+    def test_zero_disables(self, tmp_path, monkeypatch):
+        result, plans, _ = self._run(tmp_path, monkeypatch, [(1, self.THROTTLED)], retries=0)
+        assert len(plans) == 1 and result["throttle_retries"] == 0
+
+    def test_non_throttle_error_not_retried(self, tmp_path, monkeypatch):
+        result, plans, _ = self._run(tmp_path, monkeypatch, [(1, "Error: AccessDenied")])
+        assert len(plans) == 1
+
+    def test_backoff_respects_unit_timeout(self, tmp_path, monkeypatch):
+        # 15s+ backoff can't fit in a 10s budget: give up instead of overrunning
+        result, plans, sleeps = self._run(tmp_path, monkeypatch, [(1, self.THROTTLED)], timeout=10)
+        assert len(plans) == 1 and sleeps == []

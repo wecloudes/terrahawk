@@ -2,10 +2,12 @@
 
 import json
 import os
+import random
 import subprocess
 import time
 
 from .deps import mise_cmd, pinned_tf_env, resolve_tf_binary, tf_cmd, version_at_least
+from .plan_parser import is_throttled
 
 # Terragrunt 1.2 graduated the experiments terrahawk relies on: reading
 # dependency outputs straight from state is the default (the explicit flag is
@@ -67,6 +69,20 @@ _RETRYABLE_INIT_ERRORS = (
 
 def _is_retryable_init_error(output):
     return any(e in output for e in _RETRYABLE_INIT_ERRORS)
+
+
+# Provider API rate limiting (AWS / Azure / GCP): parallel plans across many
+# units hit the same account's API limits; the providers' own retries give up
+# eventually and the plan fails. A throttled plan (`is_throttled()`) is
+# retried after a backoff instead of being reported as a plain plan error.
+# Base backoff per throttle retry (seconds); jitter of up to +25% is added so
+# parallel units throttled together don't retry in lockstep.
+_THROTTLE_BACKOFF = (15, 45, 90, 180)
+
+
+def _throttle_delay(attempt):
+    base = _THROTTLE_BACKOFF[min(attempt, len(_THROTTLE_BACKOFF) - 1)]
+    return base + random.uniform(0, base * 0.25)
 
 
 def _resolve_cache_dir(unit_dir, info):
@@ -208,18 +224,17 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
     plan_args = _build_plan_args(unit_dir, plan_file, getattr(args, "no_hooks", False), tg_version)
     plan_cmd = tg_cmd(plan_args)
 
-    try:
+    def plan_once():
         r = subprocess.run(plan_cmd, capture_output=True, text=True,
                            timeout=my_timeout, env=plan_env)
-        exit_code = r.returncode
-        plan_output = r.stdout + r.stderr
+        ec, out = r.returncode, r.stdout + r.stderr
 
         # Retry with `init -upgrade` if provider/plugin issues detected —
         # re-downloads the provider plugins to recover from a corrupt/partial
         # cache. This is local-only (provider binaries + .terraform.lock.hcl,
         # which cleanup restores from git); it never touches remote state, so
         # the scan stays read-only.
-        if exit_code != 0 and _is_retryable_init_error(plan_output):
+        if ec != 0 and _is_retryable_init_error(out):
             subprocess.run(
                 tg_cmd([
                     "init", "-upgrade", "-input=false", "-no-color",
@@ -229,8 +244,23 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
             )
             r = subprocess.run(plan_cmd, capture_output=True, text=True,
                                timeout=my_timeout, env=plan_env)
-            exit_code = r.returncode
-            plan_output = r.stdout + r.stderr
+            ec, out = r.returncode, r.stdout + r.stderr
+        return ec, out
+
+    max_throttle_retries = max(0, int(getattr(args, "throttle_retries", 2) or 0))
+    throttle_retries = 0
+    try:
+        exit_code, plan_output = plan_once()
+        # Provider API throttling: back off and re-plan, within the unit's
+        # timeout budget. Only failed plans (not drift exit 2) are retried.
+        while (exit_code not in (0, 2) and is_throttled(plan_output)
+               and throttle_retries < max_throttle_retries):
+            delay = _throttle_delay(throttle_retries)
+            if time.monotonic() - t_start + delay >= my_timeout:
+                break
+            time.sleep(delay)
+            throttle_retries += 1
+            exit_code, plan_output = plan_once()
     except subprocess.TimeoutExpired as e:
         exit_code = 124
         plan_output = (e.stdout or b"").decode(errors="replace") + f"\nTIMEOUT: Plan exceeded {my_timeout}s."
@@ -240,6 +270,7 @@ def run_plan(unit_dir, rel_path, timeout, args, unit_timeouts, script_dir, tmp_d
 
     result["exit_code"] = exit_code
     result["plan_output"] = plan_output
+    result["throttle_retries"] = throttle_retries
 
     # Rendered config (terragrunt 1.x): fully resolved inputs, module source,
     # and remote_state config (no ${local.X} left). Powers exact state-age

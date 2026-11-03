@@ -114,3 +114,12 @@ class TestPlanSummary:
     def test_empty_when_nothing(self):
         assert process._plan_summary("", []) == ""
         assert process._plan_summary("", [{"action": "read"}]) == ""
+
+
+class TestThrottledClass:
+    def test_rate_limit_error_classified_first(self):
+        assert process._classify_error(
+            "error", "Error: ThrottlingException: Rate exceeded (signature ok)") == "throttled"
+
+    def test_timeout_status_stays_timeout(self):
+        assert process._classify_error("timeout", "429 Too Many Requests") == "timeout"

@@ -26,6 +26,11 @@ from .report import generate_report
 from .graph import cmd_graph
 from .hygiene import check_hygiene, attach_hygiene
 from .push import maybe_push
+from .ignore import load_rules, apply_rules
+from .history import load_baseline, annotate
+from .owners import attach_owners
+from .export import write_sarif, write_junit
+from .notify import maybe_notify
 
 
 def _parse_args(repo_root):
@@ -56,11 +61,38 @@ def _parse_args(repo_root):
                         default=str(config.get("dag", "true")).lower() != "false",
                         help="Execute units in dependency-ordered topological waves "
                              "(default: on; use --no-dag, or set dag=false in .terrahawk.yml, to disable)")
-    parser.add_argument("--fail-on", choices=["never", "drift", "error"],
+    parser.add_argument("--fail-on", choices=["never", "drift", "error", "new"],
                         default=config.get("fail_on", "never"),
                         help="Exit nonzero when the scan finds drift or errors, for CI gating. "
-                             "'drift' fails on any drift OR error; 'error' fails only on errors/timeouts. "
-                             "Default: never (always exit 0).")
+                             "'drift' fails on any drift OR error; 'error' fails only on errors/timeouts; "
+                             "'new' fails only on drift/errors that are new since the baseline. "
+                             "Ignored drift never fails. Default: never (always exit 0).")
+    parser.add_argument("--baseline", type=str, default=config.get("baseline") or None,
+                        metavar="PATH|URL",
+                        help="Previous JSON report to compare against (new / persisting / resolved "
+                             "drift). Default: newest full report in terrahawk_results/. In CI, point "
+                             "it at the previous run's published JSON (local path or http(s) URL)")
+    parser.add_argument("--ignore-file", type=str, default=config.get("ignore_file") or None,
+                        metavar="PATH",
+                        help="Known-drift ignore rules, relative to the root dir (default: "
+                             ".terrahawkignore when present)")
+    parser.add_argument("--codeowners", type=str, default=config.get("codeowners") or None,
+                        metavar="PATH",
+                        help="CODEOWNERS file for unit owners, relative to the root dir (default: "
+                             ".github/CODEOWNERS, CODEOWNERS, docs/CODEOWNERS, .gitlab/CODEOWNERS)")
+    parser.add_argument("--sarif", type=str, default=config.get("sarif") or None, metavar="PATH",
+                        help="Also write findings as SARIF 2.1.0 (GitHub code scanning annotations)")
+    parser.add_argument("--junit", type=str, default=config.get("junit") or None, metavar="PATH",
+                        help="Also write a JUnit XML report (GitLab / Azure DevOps / Jenkins test views)")
+    parser.add_argument("--notify-on", choices=["new", "findings", "never"],
+                        default=config.get("notify_on", "new"),
+                        help="When to post the Slack/Teams summary (webhook URL from the "
+                             "TERRAHAWK_WEBHOOK_URL env var only). 'new' (default): new drift/errors "
+                             "since the baseline; 'findings': any drift/error; 'never'")
+    parser.add_argument("--report-url", type=str, default=config.get("report_url") or None,
+                        metavar="URL",
+                        help="Where the published report lives (linked from alerts). A URL ending in "
+                             "'/' gets the report file name appended")
     parser.add_argument("--diagram-assets", choices=["inline", "sidecar"],
                         default=config.get("diagram_assets", "inline"),
                         help="How the Mermaid runtime is delivered in the report. "
@@ -87,6 +119,10 @@ def _parse_args(repo_root):
                              "unit to the profile owning its account (via `aws sts get-caller-identity` + the "
                              "unit's env.hcl aws_account_id), so multiple accounts land in ONE report. "
                              "Config: aws_profiles: a,b in .terrahawk.yml")
+    parser.add_argument("--throttle-retries", type=int,
+                        default=int(config.get("throttle_retries", 2)), metavar="N",
+                        help="Re-plan a unit up to N times with backoff when the provider API "
+                             "rate-limits it (Throttling / 429 / TooManyRequests). Default: 2; 0 disables")
     parser.add_argument("--terraform-version", type=str, default=config.get("terraform_version", ""))
     parser.add_argument("--terragrunt-version", type=str, default=config.get("terragrunt_version", ""))
     parser.add_argument("--push-url", type=str, default=config.get("push_url") or None,
@@ -96,6 +132,13 @@ def _parse_args(repo_root):
                         help="Terrakettle per-project push token (default: $TERRAKETTLE_TOKEN)")
     parser.add_argument("--version", action="version", version=f"terrahawk {__version__}")
     args = parser.parse_args()
+    # Webhook URLs are credentials: they must come from the CI secret store
+    # (TERRAHAWK_WEBHOOK_URL), never from a committed config file.
+    leaked = [k for k in config if "webhook" in k.lower()]
+    if leaked:
+        print(f"  \u26a0\ufe0f  Ignoring {', '.join(leaked)} in .terrahawk.yml: webhook URLs are "
+              "secrets. Set TERRAHAWK_WEBHOOK_URL from your CI secret store instead, and "
+              "rotate the exposed webhook.")
     # `action=append` can't take a config default cleanly; fall back to the
     # comma/space-separated `aws_profiles` from .terrahawk.yml when no --profile.
     if not args.profile and config.get("aws_profiles"):
@@ -233,7 +276,7 @@ def _assemble_results(raw_results, args, blob_dates, root_provider_tpl, last_jso
     return results
 
 
-def _write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args, stack_graphs=None):
+def _write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args, stack_graphs=None, meta=None):
     """Write JSON report, manifest, and HTML report."""
     # Write JSON
     with open(json_report, "w") as f:
@@ -244,10 +287,10 @@ def _write_outputs(results, json_report, html_report, manifest_path, config_dir,
 
     # Generate HTML
     print("\U0001f4dd Generating HTML report...")
-    generate_report(results, str(html_report), report_date, versions, args, stack_graphs)
+    generate_report(results, str(html_report), report_date, versions, args, stack_graphs, meta)
 
 
-def _print_summary(results, total_to_scan, html_report, json_report, args):
+def _print_summary(results, total_to_scan, html_report, json_report, args, trend=None):
     """Print final summary."""
     total = len(results)
     clean = sum(1 for r in results if r["status"] == "clean")
@@ -268,6 +311,13 @@ def _print_summary(results, total_to_scan, html_report, json_report, args):
 
     if timeouts:
         print(f"  \u23f1\ufe0f  Timeouts   : {timeouts}")
+    ignored = sum(1 for r in results if r.get("ignoredStatus"))
+    if ignored:
+        print(f"  \U0001f648 Ignored    : {ignored} unit(s) whose drift is all in .terrahawkignore")
+    if trend and trend.get("baseline"):
+        c = trend["counts"]
+        print(f"  \u2728 vs {trend['baseline']}: {c['newDrift']} new drift, {c['newError']} new error(s), "
+              f"{c['persisting']} persisting, {c['resolved']} resolved")
 
     print(f"""
   \U0001f4ca HTML report : {html_report}
@@ -588,6 +638,43 @@ def main():
         for f in leftovers["unformatted"]:
             print(f"  ⚠️  Needs formatting: {f}")
 
+    # Ownership from CODEOWNERS (no-op without one)
+    co_path = attach_owners(results, repo_root, config_dir, args.codeowners)
+    if co_path:
+        owned = sum(1 for r in results if r.get("owners"))
+        print(f"\U0001f465 Owners: {owned}/{len(results)} units matched in {os.path.relpath(co_path, repo_root)}")
+    elif args.codeowners:
+        print(f"  \u26a0\ufe0f  CODEOWNERS file not found: {args.codeowners}")
+
+    # Known-drift ignore rules (.terrahawkignore)
+    rules, rule_warnings, rules_path = load_rules(repo_root, args.ignore_file)
+    for w in rule_warnings:
+        print(f"  \u26a0\ufe0f  Ignore rules: {w}")
+    expired = apply_rules(results, rules)
+    if rules_path:
+        n_ign = sum(r.get("ignoredCount", 0) for r in results)
+        print(f"\U0001f648 Ignore rules: {len(rules)} rule(s), {n_ign} change(s) ignored")
+        for r in expired:
+            print(f"  \u26a0\ufe0f  Ignore rule expired (line {r.line}, until {r.until}): {r.text}")
+        # Unused rules only mean something on a full scan
+        if not (args.unit or args.incremental or args.affected):
+            for r in rules:
+                if r.hits == 0 and r not in expired:
+                    print(f"  \u2139\ufe0f  Ignore rule matched nothing (line {r.line}): {r.text}")
+
+    # Single-unit reports are not usable baselines for the next full run
+    if args.unit:
+        for r in results:
+            r["partialRun"] = True
+
+    # Run-over-run comparison: new / persisting / resolved
+    baseline, baseline_label, baseline_date = load_baseline(args.baseline, str(output_dir), json_report)
+    if baseline is None and args.baseline:
+        print(f"  \u26a0\ufe0f  Baseline: {baseline_label}")
+    counts = annotate(results, baseline, datetime.now().date().isoformat(), baseline_date)
+    trend = {"baseline": baseline_label if baseline is not None else "",
+             "baselineDate": baseline_date, "counts": counts}
+
     # Build per-stack "units-in-stack" diagrams (empty when no stacks)
     stack_graphs = build_stack_graphs(results, native_deps, dir_by_relpath)
     if stack_graphs:
@@ -595,10 +682,22 @@ def main():
 
     # Write outputs
     _write_outputs(results, json_report, html_report, manifest_path, config_dir,
-                   report_date, versions, args, stack_graphs)
+                   report_date, versions, args, stack_graphs, meta={"trend": trend})
+
+    # CI-native outputs
+    if args.sarif:
+        n = write_sarif(results, args.sarif, repo_root, config_dir, __version__)
+        print(f"\U0001f4e4 SARIF: {n} result(s) \u2192 {args.sarif}")
+    if args.junit:
+        n = write_junit(results, args.junit)
+        print(f"\U0001f4e4 JUnit: {n} test case(s) \u2192 {args.junit}")
 
     # Summary
-    _print_summary(results, total_to_scan, html_report, json_report, args)
+    _print_summary(results, total_to_scan, html_report, json_report, args, trend)
+
+    # Slack/Teams alert (webhook URL from TERRAHAWK_WEBHOOK_URL only)
+    maybe_notify(results, counts, args.notify_on, args.report_url or "",
+                 Path(html_report).name, trend["baseline"])
 
     # Publish to Terrakettle (no-op unless --push-url configured)
     maybe_push(args, json_report, html_report)
@@ -611,6 +710,10 @@ def main():
     drift = sum(1 for r in results if r["status"] == "drift")
     errors = sum(1 for r in results if r["status"] == "error")
     timeouts = sum(1 for r in results if r["status"] == "timeout")
+    if args.fail_on == "new" and counts["new"] > 0:
+        print(f"⚠️  --fail-on=new: exiting 2 ({counts['newDrift']} new drift, "
+              f"{counts['newError']} new error(s))")
+        return 2
     if args.fail_on == "error" and (errors > 0 or timeouts > 0):
         print(f"⚠️  --fail-on={args.fail_on}: exiting 2 (drift={drift}, error={errors + timeouts})")
         return 2

@@ -511,6 +511,7 @@ def _draw_list(stdscr, rows, cursor, scroll, filters, all_units, sort_mode):
             has_diag = "D" if unit.get("planDiagram") else " "
             has_plan = "P" if unit.get("planResources") else " "
             stk = "S" if unit.get("isStack") else " "
+            trend = {"new": "N", "resolved": "R"}.get(unit.get("trend"), " ")
             # Warning flag: hcl issues / unformatted / out-of-band drift
             warn = "!" if (unit.get("hclIssues") or unit.get("unformattedFiles")
                            or unit.get("driftedResources")) else " "
@@ -518,7 +519,7 @@ def _draw_list(stdscr, rows, cursor, scroll, filters, all_units, sort_mode):
             tag_ind = f"T{ntags}" if ntags else "  "
             dur = f"{unit['duration']:.0f}s" if unit.get("duration") is not None else ""
 
-            right = f" {stk}{warn}{has_plan}{has_diag} {tag_ind:>3s} {res:>5s} {age:>6s} {dur:>5s}"
+            right = f" {trend}{stk}{warn}{has_plan}{has_diag} {tag_ind:>3s} {res:>5s} {age:>6s} {dur:>5s}"
             name_w = max(w - len(right) - 6, 10)
             if len(short_path) > name_w:
                 short_path = "..." + short_path[-(name_w - 3):]
@@ -549,6 +550,21 @@ def _format_detail(unit):
 
     lines.append((5, f" Unit: {unit['unit']}"))
     lines.append((color, f" Status: {status.upper()}"))
+    trend = unit.get("trend")
+    if trend == "new":
+        was = f" (was {unit['prevStatus']})" if unit.get("prevStatus") else ""
+        lines.append((3, f" Since last run: NEW{was}"))
+    elif trend == "persisting":
+        lines.append((7, f" Since last run: persisting since {unit.get('since') or '?'}"))
+    elif trend == "resolved":
+        lines.append((1, f" Since last run: resolved (was {unit.get('prevStatus', '?')})"))
+    if unit.get("owners"):
+        lines.append((5, f" Owners: {' '.join(unit['owners'])}"))
+    if unit.get("ignoredCount"):
+        extra = f" — would be {unit['ignoredStatus'].upper()}" if unit.get("ignoredStatus") else ""
+        lines.append((7, f" Ignored: {unit['ignoredCount']} change(s) by .terrahawkignore{extra}"))
+    if unit.get("throttleRetries"):
+        lines.append((7, f" Rate limited: re-planned {unit['throttleRetries']}x after provider throttling"))
     if unit.get("isStack"):
         sn = unit.get("stackName") or ""
         lines.append((5, f" Stack: {sn} (from terragrunt.stack.hcl)" if sn else " Stack: (from terragrunt.stack.hcl)"))
@@ -602,7 +618,7 @@ def _format_detail(unit):
         lines.append((2, f" ⚠ Changed Outside Terraform ({len(drifted)})"))
         for r in drifted:
             acts = ",".join(r.get("actions", []))
-            lines.append((2, f"   {acts:8s}  {r.get('address', '?')}"))
+            lines.append((2, f"   {acts:8s}  {r.get('address', '?')}{_enc_suffix(r)}"))
         lines.append((7, ""))
 
     # Drift
@@ -937,8 +953,14 @@ def _get_plan_types(plan_resources):
 
 
 def _enc_suffix(resource):
-    """Marker for changes that only re-encode base64-gzip content."""
-    return "  [gzip re-encode only]" if resource.get("encodingOnly") else ""
+    """Per-resource markers: gzip re-encode only, new since the last run,
+    ignored by .terrahawkignore."""
+    out = "  [gzip re-encode only]" if resource.get("encodingOnly") else ""
+    if resource.get("isNew"):
+        out += "  [new]"
+    if resource.get("ignored"):
+        out += f"  [ignored: {resource['ignored']}]"
+    return out
 
 
 def _draw_plan(stdscr, unit, plan_rows, cursor, scroll, action_filter, type_filter, hscroll, wrap):

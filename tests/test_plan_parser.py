@@ -192,3 +192,48 @@ class TestEncodingOnly:
         assert res["aws_instance.web"]["action"] == "replace"
         assert res["aws_instance.web"]["encodingOnly"] == ["user_data_base64"]
         assert "encodingOnly" not in res["aws_s3_bucket.b"]
+
+
+class TestThrottleDetection:
+    @pytest.mark.parametrize("text", [
+        "Error: ThrottlingException: Rate exceeded",
+        "api error Throttling: Rate exceeded",
+        "StatusCode: 429, RequestID: abc",
+        'Status=429 Code="TooManyRequests"',
+        "googleapi: Error 429: Quota exceeded for quota metric",
+        "Error 403: rateLimitExceeded",
+        "RequestLimitExceeded: Request limit exceeded.",
+        "Error: SlowDown: Please reduce your request rate.",
+    ])
+    def test_throttled(self, text):
+        assert plan_parser.is_throttled(text)
+
+    @pytest.mark.parametrize("text", [
+        "", None, "Error: AccessDenied", "arn:aws:iam::429000000000:role/x",
+        "listening on port 4290", "a gradual slowdown in the", "Plan: 429 to add",
+    ])
+    def test_not_throttled(self, text):
+        assert not plan_parser.is_throttled(text)
+
+
+class TestChangedAttrPaths:
+    def test_names_only_and_unknown_skipped(self):
+        change = {"before": {"tags": {"Owner": "a"}, "id": "i-1", "size": 1},
+                  "after": {"tags": {"Owner": "b"}, "id": None, "size": 1},
+                  "after_unknown": {"id": True}}
+        assert plan_parser.changed_attr_paths(change) == ["tags.Owner"]
+
+    def test_create_has_no_paths(self):
+        assert plan_parser.changed_attr_paths({"before": None, "after": {"a": 1}}) == []
+
+    def test_json_resources_and_drift_carry_paths(self):
+        pj = {"resource_changes": [{"address": "aws_s3_bucket.a", "type": "aws_s3_bucket",
+                                    "change": {"actions": ["update"],
+                                               "before": {"versioning": [{"enabled": False}]},
+                                               "after": {"versioning": [{"enabled": True}]}}}],
+              "resource_drift": [{"address": "aws_sg.x", "type": "aws_sg",
+                                  "change": {"actions": ["update"],
+                                             "before": {"ingress": ["a"]}, "after": {"ingress": ["b"]}}}]}
+        res = plan_parser.parse_plan_resources_json(pj)
+        assert res[0]["changedAttrs"] == ["versioning.0.enabled"]
+        assert plan_parser.extract_resource_drift(pj)[0]["changedAttrs"] == ["ingress.0"]

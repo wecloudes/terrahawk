@@ -197,6 +197,28 @@ def _known_diffs(before, after, unknown, path=()):
         yield path, before, after
 
 
+# Cap on attribute paths recorded per resource (report size on huge diffs).
+_MAX_CHANGED_ATTRS = 100
+
+
+def changed_attr_paths(change):
+    """Dotted attribute paths whose known value differs between before/after.
+
+    Names only — values are never emitted. Computed (`after_unknown`)
+    attributes are skipped. Used for ignore rules (`ignore.py`) and display.
+    Returns [] for creates/deletes (one side is null).
+    """
+    before, after = change.get("before"), change.get("after")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    paths = []
+    for path, _b, _a in _known_diffs(before, after, change.get("after_unknown")):
+        paths.append(".".join(str(x) for x in path))
+        if len(paths) >= _MAX_CHANGED_ATTRS:
+            break
+    return paths
+
+
 def encoding_only_paths(change):
     """Attribute paths of a change that only re-encodes gzip content.
 
@@ -249,6 +271,9 @@ def parse_plan_resources_json(plan_json):
             "body": "\n".join(body_parts),
         }
         if action in ("update", "replace"):
+            attrs = changed_attr_paths(change)
+            if attrs:
+                entry["changedAttrs"] = attrs
             enc = encoding_only_paths(change)
             if enc:
                 entry["encodingOnly"] = enc
@@ -259,7 +284,7 @@ def parse_plan_resources_json(plan_json):
 def extract_resource_drift(plan_json):
     """Extract out-of-band drift (changes made outside Terraform) from plan JSON.
 
-    Returns [{address, type, actions}] — values are intentionally omitted
+    Returns [{address, type, actions[, changedAttrs]}] — values are intentionally omitted
     (drift entries may contain raw sensitive data in before/after).
     """
     drifted = []
@@ -267,9 +292,29 @@ def extract_resource_drift(plan_json):
         actions = [a for a in rd.get("change", {}).get("actions", []) if a != "no-op"]
         if not actions:
             continue
-        drifted.append({
+        item = {
             "address": rd.get("address", "?"),
             "type": rd.get("type", ""),
             "actions": actions,
-        })
+        }
+        attrs = changed_attr_paths(rd.get("change", {}))
+        if attrs:
+            item["changedAttrs"] = attrs
+        drifted.append(item)
     return drifted
+
+
+# Provider API rate-limit failures (AWS / Azure / GCP) in plan output. Used by
+# the worker to back off and re-plan, and by error classification.
+_THROTTLE_RE = re.compile(
+    r"Throttling|TooManyRequests|Too Many Requests|Rate exceeded|"
+    r"RequestLimitExceeded|RequestThrottled|(?-i:SlowDown)|"
+    r"(?:user)?rateLimitExceeded|rate limit(?:ed)? exceeded|"
+    r"(?:status(?:\s*code)?|statuscode|error|http)[\s:=]*429\b",
+    re.IGNORECASE,
+)
+
+
+def is_throttled(output):
+    """True when plan output shows a provider API rate-limit failure."""
+    return bool(_THROTTLE_RE.search(output or ""))

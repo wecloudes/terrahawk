@@ -24,6 +24,20 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  report-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install package with test + browser extras
+        run: pip install -e .[test,browser]
+      - name: Install headless Chromium
+        run: playwright install --with-deps chromium
+      - name: Render the HTML report in every theme
+        run: pytest -q -m browser
+
   docker-build:
     needs: test
     runs-on: ubuntu-latest

@@ -19,6 +19,22 @@
 .stack-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--blue-border);color:var(--blue);padding:5px 12px;border-radius:20px;cursor:pointer;font-size:13px;transition:all .15s}
 .stack-chip:hover{background:var(--blue-bg);border-color:var(--blue)}
 .stack-chip .sc-count{font-size:11px;color:var(--text-muted)}
+.trend-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;margin-left:4px;white-space:nowrap;cursor:help;border:1px solid var(--border);color:var(--text-muted)}
+.trend-new{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
+.trend-resolved{background:var(--green-bg);color:var(--green);border-color:var(--green-border)}
+.owner-chip{font-size:10px;padding:1px 6px;border-radius:8px;margin-left:4px;white-space:nowrap;color:var(--text-muted);border:1px dashed var(--border);font-family:var(--font-mono);cursor:help}
+.ign-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;color:var(--text-dim);border:1px dashed var(--text-dim);cursor:help}
+.res-tag{font-size:10px;padding:0 5px;border-radius:6px;margin-left:6px;white-space:nowrap;border:1px solid var(--border);color:var(--text-muted);cursor:help}
+.res-tag.new{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
+tr.res-ignored td,.oob-row.res-ignored{opacity:.5}
+.trend-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+.trend-bar .tb-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
+.trend-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.trend-chip:hover,.trend-chip.active{border-color:var(--accent)}
+.trend-chip.tc-new{border-color:var(--red-border);color:var(--red)}
+.trend-chip.tc-resolved{border-color:var(--green-border);color:var(--green)}
+.trend-chip .tc-count{font-weight:700}
+.stat-card .delta{font-size:11px;color:var(--red);font-weight:600;margin-top:2px}
 .dur-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;margin-left:4px;white-space:nowrap;color:var(--text-muted);border:1px solid var(--border)}
 .oob-content{padding:10px 16px;background:var(--yellow-bg);border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:12px}
 .oob-title{color:var(--yellow);font-weight:600;margin-bottom:6px}
@@ -199,7 +215,7 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 [data-theme="cyberpunk"] body{background-image:linear-gradient(rgba(0,240,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(0,240,255,.035) 1px,transparent 1px),radial-gradient(ellipse at 50% -10%,rgba(255,0,60,.16),transparent 60%);background-size:44px 44px,44px 44px,100% 100%;background-attachment:fixed}
 [data-theme="cyberpunk"] body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:2000;background:repeating-linear-gradient(to bottom,rgba(255,255,255,.022) 0 1px,transparent 1px 3px)}
 [data-theme="cyberpunk"] *,[data-theme="cyberpunk"] *::before,[data-theme="cyberpunk"] *::after{border-radius:0!important}
-[data-theme="cyberpunk"] :is(.header h1,.header h2,.stat-card .number,.stat-card .label,.cov-container h3,.sub-header h2,.filter-btn,.toggle-btn,.badge,.modal-header,.ec-label,.sb-label,.theme-menu button){font-family:var(--font-display);letter-spacing:.06em}
+[data-theme="cyberpunk"] :is(.header h1,.header h2,.stat-card .number,.stat-card .label,.cov-container h3,.sub-header h2,.filter-btn,.toggle-btn,.badge,.modal-header,.ec-label,.sb-label,.tb-label,.theme-menu button){font-family:var(--font-display);letter-spacing:.06em}
 [data-theme="cyberpunk"] :is(.header h1,.stat-card .label,.cov-container h3,.filter-btn,.toggle-btn,.badge){text-transform:uppercase}
 [data-theme="cyberpunk"] .header{border-bottom-color:var(--yellow-border)}
 [data-theme="cyberpunk"] .header::after{content:"";position:absolute;left:0;bottom:-2px;width:140px;height:3px;background:var(--yellow)}
@@ -231,10 +247,13 @@ select.filter-select{background:var(--surface);border:1px solid var(--border);co
 <div class="cov-container"><h3>Unit Status</h3><div class="cov-bar" id="cov-bar"></div>
 <div class="cov-legend"><span class="legend-clean">Clean</span><span class="legend-drift">Drift</span><span class="legend-error">Error</span></div></div>
 <div id="err-classes"></div>
+<div id="trend-bar"></div>
 <div class="filters">
 <div class="filter-group" id="sf"></div>
 <select class="filter-select" id="sub-filter"><option value="all">All subscriptions</option></select>
 <input type="text" class="search-input" id="search" placeholder="Search units...">
+<select class="filter-select" id="trend-filter" style="display:none"><option value="">All changes</option><option value="new">New since last run</option><option value="persisting">Persisting</option><option value="resolved">Resolved</option></select>
+<select class="filter-select" id="owner-filter" style="display:none"><option value="">All owners</option><option value="__none__">Unowned</option></select>
 <select class="filter-select" id="tag-key-filter" style="display:none"><option value="">Tag key...</option></select>
 <select class="filter-select" id="tag-val-filter" style="display:none" disabled><option value="">Tag value...</option></select>
 <select class="filter-select" id="sort-select"><option value="status">Sort: Status</option><option value="name">Sort: Name</option><option value="resources">Sort: Resources</option><option value="duration">Sort: Slowest</option></select>
@@ -303,6 +322,8 @@ function themeDiagram(mmd){
 <script>
 const DATA=window.TERRAHAWK_DATA||[];
 const STACKS=window.TERRAHAWK_STACKS||[];
+const META=window.TERRAHAWK_META||{};
+const TREND=META.trend||{};
 const REPORT_DATE='%%REPORT_DATE%%';
 const HAS_DIAGRAMS=%%HAS_DIAGRAMS%%;
 const HAS_TAGS=%%HAS_TAGS%%;
@@ -356,6 +377,9 @@ function init(){
     <div class="stat-card stat-error"><div class="number">${E}</div><div class="label">Errors</div></div>`;
   if(TO)cards+=`<div class="stat-card stat-timeout"><div class="number">${TO}</div><div class="label">Timeouts</div></div>`;
   document.getElementById('stats').innerHTML=cards;
+  if(TREND.baseline){const tc=TREND.counts||{};
+    const addDelta=(cls,n,what)=>{if(!n)return;const c=document.querySelector('#stats .'+cls);if(c)c.insertAdjacentHTML('beforeend',`<div class="delta" title="New since ${esc(TREND.baseline)}">+${n} new ${what}</div>`);};
+    addDelta('stat-drift',tc.newDrift,'');addDelta('stat-error',tc.newError,'');}
   if(T>0)document.getElementById('cov-bar').innerHTML=`<div class="seg-clean" style="width:${C/T*100}%"></div><div class="seg-drift" style="width:${D/T*100}%"></div><div class="seg-error" style="width:${E/T*100}%"></div><div class="seg-timeout" style="width:${TO/T*100}%"></div>`;
   if(TO)document.querySelector('.cov-legend').innerHTML+='<span class="legend-timeout">Timeout</span>';
   const sf=document.getElementById('sf');
@@ -366,6 +390,12 @@ function init(){
   subs.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o);});
   sel.addEventListener('change',render);
   document.getElementById('search').addEventListener('input',render);
+  const tf=document.getElementById('trend-filter');
+  if(TREND.baseline){tf.style.display='';tf.addEventListener('change',()=>{syncTrendChips();render();});}
+  const owners=[...new Set(DATA.flatMap(d=>d.owners||[]))].sort();
+  if(owners.length){const of=document.getElementById('owner-filter');of.style.display='';
+    owners.forEach(o=>{const op=document.createElement('option');op.value=o;op.textContent=o;of.appendChild(op);});
+    of.addEventListener('change',render);}
   document.getElementById('sort-select').addEventListener('change',render);
   // Tag key/value filters
   if(HAS_TAGS){
@@ -392,13 +422,14 @@ function init(){
   if(HAS_TAGS)thtml+=`<button class="toggle-btn on" id="tog-tags" onclick="toggleView('tags')" title="Toggle resource tags">\u{1f3f7}</button>`;
   tg.innerHTML=thtml;
   renderErrorClasses();
+  renderTrendBar();
   renderStacksBar();
   render();
 }
 function renderErrorClasses(){
   const el=document.getElementById('err-classes');if(!el)return;
-  const LABELS={config:'Config/HCL',auth:'Auth',init:'Init/State',dependency:'Dependency',plan:'Plan',timeout:'Timeout',other:'Other'};
-  const ORDER=['config','auth','init','dependency','plan','timeout','other'];
+  const LABELS={config:'Config/HCL',auth:'Auth',init:'Init/State',dependency:'Dependency',throttled:'Rate limited',plan:'Plan',timeout:'Timeout',other:'Other'};
+  const ORDER=['config','auth','init','dependency','throttled','plan','timeout','other'];
   const counts={};
   DATA.forEach(d=>{
     if(d.status!=='error'&&d.status!=='timeout')return;
@@ -414,6 +445,36 @@ function renderErrorClasses(){
   Object.keys(counts).forEach(k=>{if(!ORDER.includes(k))h+=`<span class="err-chip">${esc(k)}<span class="ec-count">${counts[k]}</span></span>`;});
   el.innerHTML=h;
 }
+// Run-over-run summary: what changed since the baseline report.
+function renderTrendBar(){
+  const el=document.getElementById('trend-bar');if(!el)return;
+  if(!TREND.baseline){el.className='';el.innerHTML='';return;}
+  const tc=TREND.counts||{};
+  el.className='trend-bar';
+  const chip=(k,cls,label,n)=>`<button type="button" class="trend-chip ${cls}" data-trend="${k}" onclick="setTrendFilter('${k}')">${label}<span class="tc-count">${n||0}</span></button>`;
+  el.innerHTML=`<span class="tb-label" title="Compared with ${esc(TREND.baseline)}">⇄ Since last run${TREND.baselineDate?' ('+esc(TREND.baselineDate)+')':''}</span>`+
+    chip('new','tc-new','New',tc.new)+chip('persisting','','Persisting',tc.persisting)+chip('resolved','tc-resolved','Resolved',tc.resolved);
+  syncTrendChips();
+}
+function setTrendFilter(k){const tf=document.getElementById('trend-filter');tf.value=tf.value===k?'':k;syncTrendChips();render();}
+function syncTrendChips(){const v=document.getElementById('trend-filter').value;document.querySelectorAll('#trend-bar .trend-chip').forEach(c=>c.classList.toggle('active',c.dataset.trend===v));}
+// Badges shared by flat rows and stack leaves: trend, owners, ignored, throttling.
+function trendBadges(u){
+  let h='';
+  if(u.trend==='new')h+=`<span class="trend-badge trend-new" title="New since the last run${u.prevStatus?' (was '+esc(u.prevStatus)+')':''}">NEW</span>`;
+  else if(u.trend==='persisting'&&u.since){const days=Math.max(0,Math.round((Date.parse(REPORT_DATE.slice(0,10))-Date.parse(u.since))/864e5));h+=`<span class="trend-badge" title="Same status since ${esc(u.since)}">${days?days+'d':'today'}</span>`;}
+  else if(u.trend==='resolved')h+=`<span class="trend-badge trend-resolved" title="Was ${esc(u.prevStatus||'')} in the last run">resolved</span>`;
+  if(u.ignoredCount)h+=`<span class="ign-badge" title="${u.ignoredCount} change(s) suppressed by .terrahawkignore${u.ignoredStatus?' — unit would otherwise be '+esc(u.ignoredStatus):''}">ign ${u.ignoredCount}</span>`;
+  if(u.throttleRetries)h+=`<span class="dur-badge" title="Re-planned ${u.throttleRetries}× after provider API rate limiting">↻ ${u.throttleRetries}</span>`;
+  if((u.owners||[]).length)h+=`<span class="owner-chip" title="Owners (CODEOWNERS): ${esc(u.owners.join(' '))}">${esc(u.owners[0])}${u.owners.length>1?' +'+(u.owners.length-1):''}</span>`;
+  return h;
+}
+function resTags(r){
+  let h='';
+  if(r.isNew)h+=`<span class="res-tag new" title="Not in the last run">new</span>`;
+  if(r.ignored)h+=`<span class="res-tag" title="Ignored by .terrahawkignore: ${esc(r.ignored)}">ignored</span>`;
+  return h;
+}
 function toggleView(which){
   if(which==='diagrams'){showDiagrams=!showDiagrams;document.getElementById('tog-diagrams').classList.toggle('on',showDiagrams);}
   if(which==='tags'){showTags=!showTags;document.getElementById('tog-tags').classList.toggle('on',showTags);}
@@ -421,10 +482,10 @@ function toggleView(which){
 }
 
 function exportCSV(){
-  const rows=[['Unit','Status','Resources','Module Source']];
+  const rows=[['Unit','Status','Trend','Since','Owners','Ignored','Resources','Module Source']];
   const filtered=getFiltered();
   for(const d of filtered){
-    rows.push([d.unit,d.status,d.resourceCount||'',d.moduleSource||'']);
+    rows.push([d.unit,d.status,d.trend||'',d.since||'',(d.owners||[]).join(' '),d.ignoredCount||'',d.resourceCount||'',d.moduleSource||'']);
   }
   const csv=rows.map(r=>r.map(c=>typeof c==='string'&&(c.includes(',')||c.includes('"'))?'"'+c.replace(/"/g,'""')+'"':c).join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
@@ -538,6 +599,7 @@ function clearFilters(){
   document.getElementById('sort-select').value='status';
   const tk=document.getElementById('tag-key-filter');if(tk){tk.value='';}
   const tv=document.getElementById('tag-val-filter');if(tv){tv.value='';tv.disabled=true;}
+  document.getElementById('trend-filter').value='';document.getElementById('owner-filter').value='';syncTrendChips();
   render();
 }
 function getFiltered(){
@@ -545,7 +607,9 @@ function getFiltered(){
   const sub=document.getElementById('sub-filter').value;const q=document.getElementById('search').value.toLowerCase();
   const tagKey=document.getElementById('tag-key-filter')?.value||'';
   const tagVal=document.getElementById('tag-val-filter')?.value||'';
-  return DATA.filter(d=>{if(st!=='all'&&d.status!==st)return false;if(sub!=='all'&&(d.environment+'/'+d.subscription)!==sub)return false;if(q&&!d.unit.toLowerCase().includes(q))return false;if(tagKey){if(!d.tags||d.tags[tagKey]===undefined)return false;if(tagVal&&d.tags[tagKey]!==tagVal)return false;}return true;});
+  const trend=document.getElementById('trend-filter')?.value||'';
+  const owner=document.getElementById('owner-filter')?.value||'';
+  return DATA.filter(d=>{if(trend&&d.trend!==trend)return false;if(owner==='__none__'?(d.owners||[]).length:owner&&!(d.owners||[]).includes(owner))return false;if(st!=='all'&&d.status!==st)return false;if(sub!=='all'&&(d.environment+'/'+d.subscription)!==sub)return false;if(q&&!d.unit.toLowerCase().includes(q)&&!(d.owners||[]).some(o=>o.toLowerCase().includes(q)))return false;if(tagKey){if(!d.tags||d.tags[tagKey]===undefined)return false;if(tagVal&&d.tags[tagKey]!==tagVal)return false;}return true;});
 }
 function hl(raw){if(!raw)return'';return raw.split('\n').map(line=>{const t=line.trimStart();
   if(t.startsWith('# ')||t.startsWith('## '))return`<span class="line-header">${esc(line)}</span>`;
@@ -641,7 +705,7 @@ function renderPlanTable(idx){
       const caret=hasBody?'<span class="plan-caret">\u25B6</span>':'<span class="plan-caret"></span>';
       const rowClass=hasBody?'plan-row':'';
       const onClick=hasBody?` onclick="togglePlanBody('${rid}',this)"`:'';
-      h+=`<tr class="${rowClass}"${onClick}><td style="width:14px">${caret}</td><td><span class="plan-act ${actCls[r.action]||''}">${actLbl[r.action]||r.action}</span></td><td class="plan-type">${esc(r.type)}</td><td class="plan-addr">${esc(r.address)}${r.encodingOnly?`<span class="enc-tag" title="${esc(ENC_NOTE+'\nAttributes: '+r.encodingOnly.join(', '))}">gzip re-encode only</span>`:''}</td></tr>`;
+      h+=`<tr class="${rowClass}${r.ignored?' res-ignored':''}"${onClick}${(r.changedAttrs||[]).length?` title="${esc('Changed: '+r.changedAttrs.join(', '))}"`:''}><td style="width:14px">${caret}</td><td><span class="plan-act ${actCls[r.action]||''}">${actLbl[r.action]||r.action}</span></td><td class="plan-type">${esc(r.type)}</td><td class="plan-addr">${esc(r.address)}${r.encodingOnly?`<span class="enc-tag" title="${esc(ENC_NOTE+'\nAttributes: '+r.encodingOnly.join(', '))}">gzip re-encode only</span>`:''}${resTags(r)}</td></tr>`;
       if(hasBody){
         h+=`<tr class="plan-body-row" id="${rid}"><td colspan="4"><pre class="diff-content" onclick="togglePlanBody('${rid}')">${hl(r.body)}</pre></td></tr>`;
       }
@@ -738,7 +802,10 @@ function showAbout(){
   \u{1f50d} <strong>Filtering &amp; Search</strong> \u2014 Filter by status, subscription, tags (key + value), and free-text search with highlighting. Toggle buttons show/hide checks, diagrams, and tags. Sort by status, name, or resource count. Export filtered results as CSV.<br><br>
   \u{1f504} <strong>Incremental Mode</strong> (<code>--incremental</code>) \u2014 Compares each unit\u2019s <code>terragrunt.hcl</code> modification time against the last report. Only changed units are re-scanned; unchanged units are merged from the previous report. Dramatically reduces scan time for large repositories where only a few units change between runs.<br><br>
   \u{1f517} <strong>Dependency-Aware Execution</strong> (<code>--dag</code>) \u2014 Parses <code>dependency</code> blocks from every <code>terragrunt.hcl</code> file to build a directed acyclic graph (DAG) of unit dependencies. Units are then executed in topological waves: all units with no unresolved dependencies run in parallel within each wave, and the next wave starts only after the previous one completes. This ensures that units depending on others (e.g., a VM unit depending on a networking unit) are planned in the correct order, avoiding init failures caused by missing dependency outputs. Circular dependencies are detected and placed in a final catch-all wave.<br><br>
-  \u{1f3a8} <strong>Themes</strong> \u2014 Dark, Light, Tokyo Night and Cyberpunk, picked from the \u25D0 menu in the header. Your choice is saved in localStorage and synced across open tabs; append <code>?theme=&lt;name&gt;</code> to the report URL to open it in a specific theme.
+  \u{1f3a8} <strong>Themes</strong> \u2014 Dark, Light, Tokyo Night and Cyberpunk, picked from the \u25D0 menu in the header. Your choice is saved in localStorage and synced across open tabs; append <code>?theme=&lt;name&gt;</code> to the report URL to open it in a specific theme.<br><br>
+  \u21C4 <strong>Since Last Run</strong> (<code>--baseline</code>) \u2014 Each scan is compared with the previous report: drift and errors are marked <em>NEW</em>, <em>persisting</em> (with how long) or <em>resolved</em>, and individual resource changes not seen before are tagged <em>new</em>. Click the chips above the unit list to filter.<br><br>
+  \u{1f648} <strong>Ignored Drift</strong> (<code>.terrahawkignore</code>) \u2014 Accepted drift (e.g. tags managed by an external service) is suppressed by unit/address/attribute rules, optionally with an expiry date. Ignored changes stay visible but dimmed; a unit whose every change is ignored counts as clean.<br><br>
+  \u{1f465} <strong>Owners</strong> \u2014 Each unit shows its owners from the repository\u2019s CODEOWNERS file; filter or search by owner.
   </p>`;
 
   h+=`<h4>Configuration File</h4><p>Terrahawk supports a <code>.terrahawk.yml</code> configuration file in the repository root. This file sets default values for all options, which can be overridden by CLI arguments. This is especially useful for CI/CD pipelines where you want consistent settings without long command lines.</p>`;
@@ -849,7 +916,7 @@ function render(){
       // Out-of-band drift badge (resources changed outside Terraform)
       const oob=u.driftedResources||[];
       if(oob.length){const names=oob.slice(0,8).map(r=>`${r.address} (${(r.actions||[]).join(',')})`).join('\n');const more=oob.length>8?`\n…and ${oob.length-8} more`:'';html+=`<span class="oob-badge" title="Changed outside Terraform:\n${esc(names+more)}">⚠ ${oob.length} ext</span>`;}
-      html+=encBadge(u);
+      html+=encBadge(u)+trendBadges(u);
       // HCL hygiene badges
       const hcl=u.hclIssues||[];
       if(hcl.length){const det=hcl.slice(0,5).map(i=>`${i.file}:${i.line||'?'} ${i.summary}`).join('\n');html+=`<span class="oob-badge" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" title="HCL validation:\n${esc(det)}">hcl ${hcl.length}</span>`;}
@@ -863,7 +930,7 @@ function render(){
       html+=`<div class="unit-expand"${exp?` id="arrow-${uid}"`:''}>${exp?'\u25B6':''}</div></div>`;
       if(exp){html+=`<div class="diff-panel" id="diff-${uid}">`;
         if(hasOob){html+=`<div class="oob-content"><div class="oob-title">⚠ Changed outside Terraform (${u.driftedResources.length})</div>`;
-          u.driftedResources.forEach(r=>{html+=`<div class="oob-row"><span class="oob-act">${esc((r.actions||[]).join(','))}</span> ${esc(r.address)}</div>`;});
+          u.driftedResources.forEach(r=>{html+=`<div class="oob-row${r.ignored?' res-ignored':''}"><span class="oob-act">${esc((r.actions||[]).join(','))}</span> ${esc(r.address)}${resTags(r)}</div>`;});
           html+=`</div>`;}
         if(hasDiff)html+=`<div class="diff-content">${hl(u.diff)}</div>`;
         if(hasErr)html+=`<div class="error-content">${esc(u.error)}</div>`;
@@ -894,7 +961,7 @@ function unitLeaf(u,uid,indent,label){
   if(u.duration!=null)html+=`<span class="dur-badge" title="Scan duration">${Math.round(u.duration)}s</span>`;
   const oob=u.driftedResources||[];
   if(oob.length){const names=oob.slice(0,8).map(r=>`${r.address} (${(r.actions||[]).join(',')})`).join('\n');const more=oob.length>8?`\n\u2026and ${oob.length-8} more`:'';html+=`<span class="oob-badge" title="Changed outside Terraform:\n${esc(names+more)}">\u26A0 ${oob.length} ext</span>`;}
-  html+=encBadge(u);
+  html+=encBadge(u)+trendBadges(u);
   const hcl=u.hclIssues||[];
   if(hcl.length){const det=hcl.slice(0,5).map(i=>`${i.file}:${i.line||'?'} ${i.summary}`).join('\n');html+=`<span class="oob-badge" style="background:var(--red-bg);color:var(--red);border-color:var(--red-border)" title="HCL validation:\n${esc(det)}">hcl ${hcl.length}</span>`;}
   if((u.unformattedFiles||[]).length)html+=`<span class="oob-badge" title="Needs formatting:\n${esc(u.unformattedFiles.join('\n'))}">fmt</span>`;
@@ -907,7 +974,7 @@ function unitLeaf(u,uid,indent,label){
   html+=`<div class="unit-expand"${exp?` id="arrow-${uid}"`:''}>${exp?'\u25B6':''}</div></div>`;
   if(exp){html+=`<div class="diff-panel" id="diff-${uid}">`;
     if(hasOob){html+=`<div class="oob-content"><div class="oob-title">\u26A0 Changed outside Terraform (${u.driftedResources.length})</div>`;
-      u.driftedResources.forEach(r=>{html+=`<div class="oob-row"><span class="oob-act">${esc((r.actions||[]).join(','))}</span> ${esc(r.address)}</div>`;});
+      u.driftedResources.forEach(r=>{html+=`<div class="oob-row${r.ignored?' res-ignored':''}"><span class="oob-act">${esc((r.actions||[]).join(','))}</span> ${esc(r.address)}${resTags(r)}</div>`;});
       html+=`</div>`;}
     if(hasDiff)html+=`<div class="diff-content">${hl(u.diff)}</div>`;
     if(hasErr)html+=`<div class="error-content">${esc(u.error)}</div>`;
