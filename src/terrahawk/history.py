@@ -6,6 +6,10 @@ A daily scan's reader needs the delta, not the full list: which drift is
 (by default the newest JSON in `terrahawk_results/`; in CI, point
 `--baseline` at the previous run's JSON — a local path or an http(s) URL).
 
+With no `--baseline`, `terrahawk_results/latest.json` (written by every full
+scan; download it there on a fresh CI runner) wins over the timestamped
+reports.
+
 Per-entry fields added:
 - `trend`: "new" | "persisting" | "resolved" | "" (no change / no baseline)
 - `prevStatus`: the unit's status in the baseline ("" when absent)
@@ -43,6 +47,13 @@ def _date_from_name(name):
         return ""
 
 
+def _date_from_entries(entries):
+    """Run date of a report without a timestamped name (latest.json):
+    the newest `scannedAt` among its entries."""
+    dates = [e.get("scannedAt") for e in entries if isinstance(e, dict) and e.get("scannedAt")]
+    return max(dates) if dates else ""
+
+
 def _load_json_list(text):
     data = json.loads(text)
     if not isinstance(data, list):
@@ -65,7 +76,7 @@ def load_baseline(spec, output_dir, exclude=None):
             except Exception as e:  # network, HTTP, JSON — report, never fail the scan
                 return None, f"could not fetch baseline URL ({type(e).__name__}: {e})", ""
             label = spec.rsplit("/", 1)[-1] or spec
-            return entries, label, _date_from_name(label)
+            return entries, label, _date_from_name(label) or _date_from_entries(entries)
         if not os.path.isfile(spec):
             return None, f"baseline file not found: {spec}", ""
         try:
@@ -73,16 +84,18 @@ def load_baseline(spec, output_dir, exclude=None):
         except Exception as e:
             return None, f"could not read baseline {spec}: {e}", ""
         name = os.path.basename(spec)
-        date_iso = _date_from_name(name) or datetime.fromtimestamp(
-            os.path.getmtime(spec)).date().isoformat()
+        date_iso = _date_from_name(name) or _date_from_entries(entries) or \
+            datetime.fromtimestamp(os.path.getmtime(spec)).date().isoformat()
         return entries, name, date_iso
 
     if not output_dir or not os.path.isdir(output_dir):
         return None, "no previous report", ""
-    candidates = sorted(
+    timestamped = sorted(
         (os.path.join(output_dir, f) for f in os.listdir(output_dir)
          if f.startswith("terrahawk_") and f.endswith(".json")),
         key=os.path.getmtime, reverse=True)
+    latest = os.path.join(output_dir, "latest.json")
+    candidates = ([latest] if os.path.isfile(latest) else []) + timestamped
     for path in candidates:
         if exclude and os.path.abspath(path) == os.path.abspath(str(exclude)):
             continue
@@ -93,7 +106,7 @@ def load_baseline(spec, output_dir, exclude=None):
         if _is_partial(entries):
             continue
         name = os.path.basename(path)
-        return entries, name, _date_from_name(name)
+        return entries, name, _date_from_name(name) or _date_from_entries(entries)
     return None, "no previous report", ""
 
 

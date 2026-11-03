@@ -27,7 +27,7 @@ Designed to run on a daily schedule via CI/CD (GitHub Actions, GitLab CI, Azure 
 - **Full Refresh Enforced** — `-refresh=false` and Terraform 1.17's `-minimal-refresh` hide out-of-band drift, so they are stripped from an inherited `TF_CLI_ARGS` / `TF_CLI_ARGS_plan` (with a warning). Flags injected via Terragrunt `extra_arguments` are not touched.
 - **Error Taxonomy** — Failed units are classified (`config`, `auth`, `init`, `dependency`, `throttled`, `plan`, `timeout`) and the report shows a per-class breakdown, so failures are triageable at a glance instead of one undifferentiated "error" bucket.
 - **CI Gating** (`--fail-on drift|error|new`) — Exit non-zero (code `2`) when the scan finds drift or errors — or, with `new`, only drift/errors that weren't there in the previous run — so a scheduled scan can fail a pipeline. Ignored drift never fails. Default `never` (always exit `0`).
-- **Since Last Run** (`--baseline`) — Every scan is compared with the previous report: drift and errors are marked **NEW**, **persisting** (with how many days) or **resolved**, and individual resource changes not seen before are tagged `new`. The report shows a "Since last run" chip bar and a trend filter. By default the baseline is the newest full report in `terrahawk_results/`; in CI, point `--baseline` at the previous run's published JSON (path or `https://` URL). `--unit` reports are never used as a baseline.
+- **Since Last Run** (`--baseline`) — Every scan is compared with the previous report: drift and errors are marked **NEW**, **persisting** (with how many days) or **resolved**, and individual resource changes not seen before are tagged `new`. The report shows a "Since last run" chip bar and a trend filter. Every full scan also writes fixed-name copies — `latest.json`, `latest.html`, `latest_data.js` — and the next run uses `terrahawk_results/latest.json` as its baseline when present (else the newest full report there). On a fresh CI runner, download the previously published `latest.json` into `terrahawk_results/` before the scan and publish the folder after it (see [CI/CD Integration](#cicd-integration)); `--baseline PATH|URL` overrides the choice. `--unit` reports never replace `latest.*` and are never used as a baseline.
 - **Ignore Known Drift** (`.terrahawkignore`) — Accepted drift (tags owned by a tagging service, autoscaling counts, ...) is suppressed by unit / address / attribute rules with an optional `until=` expiry. Ignored changes stay visible but dimmed; a unit whose every change is ignored counts as clean. Expired and unused rules are reported. See [Ignoring known drift](#ignoring-known-drift).
 - **Owners** — Units are mapped to owners from the repo's `CODEOWNERS` (GitHub rules; GitLab sections supported). Owners show on every unit, in alerts, SARIF and JUnit, and the report can be filtered by owner.
 - **SARIF & JUnit** (`--sarif PATH`, `--junit PATH`) — CI-native findings: SARIF 2.1.0 for GitHub code scanning (one alert per drifted resource / failed unit, stable fingerprints across runs), JUnit XML for GitLab, Azure DevOps and Jenkins test views.
@@ -114,7 +114,7 @@ docker pull wecloudes/terrahawk:azure
 docker pull wecloudes/terrahawk:gcp
 
 # Or pin a release:
-docker pull wecloudes/terrahawk:aws-1.9.0
+docker pull wecloudes/terrahawk:aws-1.9.1
 ```
 
 Or build locally:
@@ -354,6 +354,7 @@ Each run produces three files in `terrahawk_results/`:
 | `terrahawk_YYYYMMDD_HHMMSS.html` | HTML report (open in any browser, or upload to static storage) |
 | `terrahawk_YYYYMMDD_HHMMSS_data.js` | Report data loaded by the HTML via `<script src>` — must be kept alongside the HTML |
 | `terrahawk_YYYYMMDD_HHMMSS.json` | Raw JSON data for programmatic consumption |
+| `latest.json` / `latest.html` / `latest_data.js` | Copies of the newest **full** scan under fixed names (not written by `--unit` runs): a stable URL for dashboards and alerts, and the next run's baseline |
 
 The HTML + `_data.js` pair work everywhere: `file://`, S3, Azure Blob, GCS, any static hosting. Just keep them in the same directory.
 
@@ -415,17 +416,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Credentials via OIDC (no long-lived keys in the repo or secrets).
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TERRAHAWK_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      # Fresh runners have no history: fetch the last full report as the baseline.
+      - name: Download baseline
+        run: |
+          mkdir -p terrahawk_results
+          aws s3 cp s3://my-reports/terrahawk/latest.json terrahawk_results/latest.json || echo "no baseline yet"
+
       - name: Run Terrahawk
         env:
           TERRAHAWK_WEBHOOK_URL: ${{ secrets.TERRAHAWK_WEBHOOK_URL }}
         run: |
-          # Compare with yesterday's published report (fresh runners have no history).
           docker run --rm \
-            -e TERRAHAWK_WEBHOOK_URL \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -e TERRAHAWK_WEBHOOK_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN -e AWS_REGION \
             -v "${{ github.workspace }}":/workspace \
             terrahawk:aws --root-dir /workspace --tags \
-              --baseline https://reports.example.com/terrahawk/latest.json \
+              --report-url https://my-reports.example.com/terrahawk/latest.html \
               --sarif /workspace/terrahawk.sarif --junit /workspace/terrahawk-junit.xml
+
+      # Publish: latest.* becomes tomorrow's baseline and a stable report URL.
+      - name: Publish report
+        if: always()
+        run: aws s3 sync terrahawk_results/ s3://my-reports/terrahawk/ --exclude ".tmp_*"
 
       - name: Upload SARIF (code scanning annotations)
         if: always()
@@ -457,6 +476,19 @@ pool:
 steps:
   - checkout: self
 
+  # Fresh agents have no history: fetch the last full report as the baseline.
+  - task: AzureCLI@2
+    displayName: Download baseline
+    inputs:
+      azureSubscription: terrahawk-service-connection
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        mkdir -p terrahawk_results
+        az storage blob download --auth-mode login --account-name myreports \
+          --container-name terrahawk --name latest.json \
+          --file terrahawk_results/latest.json || echo "no baseline yet"
+
   - script: |
       docker run --rm \
         -e TERRAHAWK_WEBHOOK_URL \
@@ -473,6 +505,18 @@ steps:
       testResultsFormat: JUnit
       testResultsFiles: terrahawk-junit.xml
       testRunTitle: Terrahawk drift
+
+  # Publish: latest.* becomes tomorrow's baseline and a stable report URL.
+  - task: AzureCLI@2
+    displayName: Publish report
+    condition: always()
+    inputs:
+      azureSubscription: terrahawk-service-connection
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az storage blob upload-batch --auth-mode login --account-name myreports \
+          --destination terrahawk --source terrahawk_results --overwrite
 
   - publish: terrahawk_results/
     artifact: terrahawk-report

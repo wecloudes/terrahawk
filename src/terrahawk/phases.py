@@ -135,6 +135,11 @@ def assemble_results(raw_results, args, blob_dates, root_provider_tpl, last_json
         process_result(r, args, blob_dates, root_provider_tpl)
         for r in raw_results
     ]
+    # Date each freshly scanned entry (merged incremental entries keep theirs):
+    # a report copied to a fixed name (latest.json) still knows when it ran.
+    scanned_at = datetime.now().date().isoformat()
+    for r in results:
+        r["scannedAt"] = scanned_at
 
     # Incremental/affected merge
     if (args.incremental or args.affected) and last_json and last_json.exists():
@@ -155,8 +160,17 @@ def assemble_results(raw_results, args, blob_dates, root_provider_tpl, last_json
     return results
 
 
+LATEST_STEM = "latest"
+
+
 def write_outputs(results, json_report, html_report, manifest_path, config_dir, report_date, versions, args, stack_graphs=None, meta=None):
-    """Write JSON report, manifest, and HTML report."""
+    """Write JSON report, manifest, and HTML report.
+
+    Full scans also refresh fixed-name copies — `latest.json`, `latest.html`
+    and `latest_data.js` — so CI can publish them to a stable URL and the next
+    run (on a fresh runner) can download `latest.json` as its baseline.
+    `--unit` runs never replace them: a one-unit report is not a baseline.
+    """
     # Write JSON
     with open(json_report, "w") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -167,6 +181,12 @@ def write_outputs(results, json_report, html_report, manifest_path, config_dir, 
     # Generate HTML
     print("\U0001f4dd Generating HTML report...")
     generate_report(results, str(html_report), report_date, versions, args, stack_graphs, meta)
+
+    if not getattr(args, "unit", None):
+        out_dir = os.path.dirname(str(json_report))
+        shutil.copyfile(str(json_report), os.path.join(out_dir, LATEST_STEM + ".json"))
+        generate_report(results, os.path.join(out_dir, LATEST_STEM + ".html"), report_date,
+                        versions, args, stack_graphs, meta)
 
 
 def print_summary(results, total_to_scan, html_report, json_report, args, trend=None):

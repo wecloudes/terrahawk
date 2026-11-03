@@ -137,3 +137,34 @@ def test_exit_codes():
     assert exit_code(res, {"new": 0}, "drift") == 2
     assert exit_code(res, {"new": 0}, "new") == 0
     assert exit_code(res, {"new": 1, "newDrift": 1}, "new") == 2
+
+
+def test_latest_aliases_and_fresh_runner_baseline(repo, monkeypatch):
+    root, plans, _ = repo
+    out = root / "terrahawk_results"
+    plans.update({rel: {"exit_code": 0} for rel in ("dev/web", "prod/app", "prod/db")})
+    plans["prod/app"] = {"exit_code": 2, "plan_json": _plan_json("aws_s3_bucket.a", "acl", "a", "b")}
+    _scan(monkeypatch, root)
+    for name in ("latest.json", "latest.html", "latest_data.js"):
+        assert (out / name).is_file(), name
+    assert 'src="latest_data.js"' in (out / "latest.html").read_text()
+    latest = json.loads((out / "latest.json").read_text())
+    assert all(e.get("scannedAt") for e in latest)
+
+    # --unit runs never replace latest.*
+    import time
+    time.sleep(1.1)
+    before = (out / "latest.json").read_text()
+    _scan(monkeypatch, root, "--unit", "prod/db")
+    assert (out / "latest.json").read_text() == before
+
+    # Fresh CI runner: only the downloaded latest.json is present.
+    for f in out.iterdir():
+        if f.name != "latest.json":
+            f.unlink()
+    time.sleep(1.1)
+    _scan(monkeypatch, root)
+    by_unit = {e["unit"]: e for e in json.loads((out / "latest.json").read_text())}
+    assert by_unit["prod/app"]["trend"] == "persisting"
+    first_since = {e["unit"]: e for e in latest}["prod/app"]["since"]
+    assert first_since and by_unit["prod/app"]["since"] == first_since   # carried forward

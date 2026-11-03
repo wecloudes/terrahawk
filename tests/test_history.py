@@ -97,3 +97,36 @@ class TestLoadBaseline:
         monkeypatch.setattr(history.urllib.request, "urlopen", boom)
         entries, reason, _ = history.load_baseline("https://example.test/x.json", None)
         assert entries is None and "OSError" in reason
+
+
+class TestLatestBaseline:
+    def _write(self, d, name, entries):
+        p = os.path.join(d, name)
+        with open(p, "w") as f:
+            json.dump(entries, f)
+        return p
+
+    def test_latest_json_wins_and_dates_from_entries(self, tmp_path):
+        d = str(tmp_path)
+        self._write(d, "terrahawk_20261101_060000.json", [_e("a", "clean")])
+        latest = [dict(_e("a", "drift"), scannedAt="2026-11-02"),
+                  dict(_e("b", "clean"), scannedAt="2026-10-30")]  # merged older entry
+        self._write(d, "latest.json", latest)
+        entries, label, date_iso = history.load_baseline(None, d)
+        assert label == "latest.json" and date_iso == "2026-11-02"
+        assert entries[0]["status"] == "drift"
+
+    def test_fresh_runner_with_only_latest(self, tmp_path):
+        self._write(str(tmp_path), "latest.json", [_e("a", "drift")])
+        entries, label, date_iso = history.load_baseline(None, str(tmp_path))
+        assert label == "latest.json" and date_iso == ""
+
+    def test_partial_latest_is_skipped(self, tmp_path):
+        d = str(tmp_path)
+        self._write(d, "latest.json", [_e("a", "clean", partial=True)])
+        self._write(d, "terrahawk_20261101_060000.json", [_e("a", "drift")])
+        assert history.load_baseline(None, d)[1] == "terrahawk_20261101_060000.json"
+
+    def test_explicit_latest_path_dates_from_entries(self, tmp_path):
+        p = self._write(str(tmp_path), "latest.json", [dict(_e("a", "drift"), scannedAt="2026-11-02")])
+        assert history.load_baseline(p, None)[2] == "2026-11-02"

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-03
+
+### Added
+
+- **Fixed-name `latest.*` copies.** Every full scan also writes `latest.json`, `latest.html` and `latest_data.js` to `terrahawk_results/`, giving dashboards and alerts a stable URL. `--unit` runs never replace them.
+- **`latest.json` is the default baseline.** With no `--baseline`, a `terrahawk_results/latest.json` wins over the timestamped reports, so a fresh CI runner only has to download the previously published `latest.json` before scanning to get new / persisting / resolved trends. Entries now carry `scannedAt` (the date of the run that scanned them), which dates a baseline whose name has no timestamp.
+
+### Changed
+
+- **CI examples publish and fetch the baseline.** The GitHub Actions example downloads `latest.json` from S3 (OIDC credentials), runs as the host user, and syncs `terrahawk_results/` back; the Azure DevOps example does the same with `az storage blob` (`--auth-mode login`). Uploading stays in the pipeline: the cloud CLIs already own the credentials.
+
+### Tests
+
+- `latest.json` precedence, partial `latest.json` skipped, baseline date from `scannedAt`, aliases written only on full scans, and an end-to-end fresh-runner run that keeps `since` across runs. Suite is 294 tests.
+
 ## [1.9.0] - 2026-11-03
 
 ### Added
