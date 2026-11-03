@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-03
+
 ### Added
 
 - **Since last run.** Each scan is compared with a baseline report — by default the newest full report in `terrahawk_results/`, or `--baseline PATH|URL` (the previous run's published JSON, for fresh CI runners). Entries get `trend` (`new` / `persisting` / `resolved`), `prevStatus` and `since` (first-seen date, carried forward while the finding persists); resource changes not in the baseline get `isNew`. The report adds a "Since last run" chip bar, NEW / *N*d / resolved badges, a trend filter and "+N new" on the stat cards; the TUI shows `N`/`R` markers and a "Since last run" line. `--unit` reports are flagged `partialRun` and never used as a baseline. New `--fail-on new` gates only on new drift/errors (`history.py`).
