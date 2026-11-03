@@ -45,20 +45,24 @@ ARG CLOUD=aws
 # (scripts/build-push.sh) before publishing. Most CVEs in these images live
 # inside these precompiled Go binaries (terraform/terragrunt/gcloud), so a
 # version bump to a build with patched Go stdlib / deps is the primary lever.
-# terragrunt tracks the latest *stable* (1.1.x line: backwards-compat
-# guaranteed since 1.0, go-git CVEs patched). 1.1.x also brings CAS
-# (source-download dedup across parallel units), generated-stack detection
-# in find/git-filters, S3 chained-role fix, and lockfile-readonly support.
-# 1.1.3 adds: provider-cache download hardening (secret URL segment),
-# --filter negation fixes (used by --affected), the iam_role self-assume
-# regression fix, and per-unit feature-flag defaults.
-# 1.1.5/1.1.6 add: backend assume_role on direct dependency state reads
-# (cross-account 403 fix — multi-account scans), fallback to `output -json`
-# when a direct state read fails, lower run memory. Avoid 1.1.4: its IMDSv2
-# change broke EC2 instance-role credentials inside containers.
-# terraform 1.16.6: HTTP/2 resource-exhaustion fix (CVE-2026-78669).
-ARG TERRAFORM_VERSION=1.16.6
-ARG TERRAGRUNT_VERSION=1.1.6
+# terragrunt 1.2.x: all experiments GA (optional-dependency-outputs,
+# optional-hooks, dependency-fetch-output-from-state — terrahawk already
+# gates its flags on 1.2 via TG_GRADUATED), compiled with Go 1.27.3
+# (CVE-2026-111943, crypto/x509), and a big discovery/shared-config parse
+# speedup (shared `read_terragrunt_config` files parse once, not per unit;
+# `find --filter` path expressions narrow the filesystem walk — speeds
+# --affected and --unit scans on large repos). base64gzip() now uses the Go
+# 1.27 gzip encoder: the encoded value changes (decoded content is
+# identical), so the first scan after upgrading may plan re-encodes on
+# e.g. user_data_base64 — terrahawk's encoding-only detection badges those
+# as `gz only`. S3 bootstrap no longer adds a RootAccess bucket-policy
+# statement (existing buckets keep it).
+# terraform 1.17.1: built with Go 1.26.10 (CVE-2026-111943), adds
+# `-minimal-refresh` (already stripped by terrahawk's refresh guard) and
+# variables/locals in provider requirements; 1.17.1 fixes fmt and policy
+# evaluation bugs.
+ARG TERRAFORM_VERSION=1.17.1
+ARG TERRAGRUNT_VERSION=1.2.1
 ARG AWSCLI_VERSION=2.35.11
 ARG GCLOUD_VERSION=589.0.0
 
