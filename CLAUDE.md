@@ -154,8 +154,9 @@ terrahawk --help
 # Verify all modules import cleanly
 python3 -c "
 import sys; sys.path.insert(0, 'src')
-from terrahawk import cli, config, deps, discovery, incremental
+from terrahawk import cli, config, deps, discovery, incremental, options, commands, phases, findings
 from terrahawk import worker, plan_parser, process, state_age, report, tui
+from terrahawk import history, ignore, owners, export, notify
 print('All modules import successfully')
 "
 
@@ -189,7 +190,16 @@ terrahawk/
 ├── src/terrahawk/
 │   ├── __init__.py              # __version__ (keep in sync with pyproject.toml), re-export main
 │   ├── __main__.py              # python -m terrahawk support
-│   ├── cli.py                   # main() split into phase functions + orchestration
+│   ├── cli.py                   # main(): subcommand dispatch + scan() orchestrator (reads top-to-bottom)
+│   ├── options.py               # parse_args: scan CLI options with .terrahawk.yml defaults (+ webhook-in-config guard)
+│   ├── commands.py              # run_view / run_graph / run_list (scan-less subcommands)
+│   ├── phases.py                # Scan phases: clean_cache, setup, discover, resolve_profiles, run_hygiene, query_state_ages, build_waves, execute_plans, assemble_results, write_outputs, print_summary, cleanup
+│   ├── findings.py              # annotate_findings (owners → ignore → partialRun → trend), exit_code (--fail-on)
+│   ├── history.py               # load_baseline, annotate: run-over-run new/persisting/resolved
+│   ├── ignore.py                # .terrahawkignore: parse_rules, load_rules, apply_rules
+│   ├── owners.py                # CODEOWNERS parsing/matching, attach_owners
+│   ├── export.py                # SARIF 2.1.0 + JUnit XML writers
+│   ├── notify.py                # Slack / Teams webhook summary (URL from TERRAHAWK_WEBHOOK_URL only)
 │   ├── config.py                # load_config, load_unit_timeouts, detect_config_dir
 │   ├── deps.py                  # TOOLS dict, check_dependencies, get_versions
 │   ├── discovery.py             # discover_units, build_dag
@@ -202,7 +212,16 @@ terrahawk/
 │   ├── report.py                # get_html_template, generate_report
 │   ├── graph.py                 # terragrunt dag graph → Mermaid (terrahawk graph)
 │   ├── hygiene.py               # hcl validate + hcl format --check (per-unit annotations)
-│   ├── tui.py                   # Terminal UI viewer (curses-based)
+│   ├── tui/                     # Terminal UI viewer (curses-based), split per view:
+│   │   ├── __init__.py          #   re-exports run_tui
+│   │   ├── app.py               #   _tui_main loop + run_tui
+│   │   ├── common.py            #   constants, colours, _safe, report loading, _enc_suffix markers
+│   │   ├── listing.py           #   list view: filters, rows, coverage bar
+│   │   ├── detail.py            #   detail view + line wrapping
+│   │   ├── plan.py              #   plan view
+│   │   ├── module_info.py       #   module tables
+│   │   ├── diagram.py           #   in-terminal / browser diagrams
+│   │   └── prompt.py            #   search + tag prompts
 │   ├── push.py                  # Publish report to a Terrakettle server (--push-url)
 │   └── templates/
 │       ├── report.html          # Self-contained HTML report template
@@ -217,9 +236,17 @@ terrahawk/
 ### Import Graph (strict DAG, no cycles)
 
 ```
-cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
-           worker.py, process.py, state_age.py, profiles.py, report.py, tui.py, push.py
-worker.py ──→ deps.py (mise_cmd helper)
+cli.py ──→ options.py, commands.py, phases.py, findings.py, config.py, deps.py,
+           process.py, state_age.py, export.py, notify.py, push.py
+options.py ──→ config.py
+commands.py ──→ config.py, discovery.py, graph.py, tui/ (lazy, `view` only)
+phases.py ──→ deps.py, discovery.py, hygiene.py, incremental.py, process.py,
+              profiles.py, report.py, state_age.py, worker.py
+findings.py ──→ history.py, ignore.py, owners.py
+export.py ──→ owners.py (unit_repo_path)
+tui/app.py ──→ tui/{common,diagram,detail,listing,module_info,plan,prompt}.py
+tui/{detail,listing,plan,prompt}.py ──→ tui/common.py (+ plan → detail, prompt → listing)
+worker.py ──→ deps.py (mise_cmd helper), plan_parser.py (is_throttled)
 discovery.py ──→ deps.py (mise_cmd helper)
 graph.py ──→ deps.py (mise_cmd helper)
 hygiene.py ──→ deps.py (mise_cmd helper)
@@ -227,13 +254,20 @@ process.py ──→ plan_parser.py
 (all other modules: only stdlib)
 ```
 
-When adding new modules, **never introduce import cycles**. Leaf modules (deps, config, incremental, plan_parser, state_age, profiles, report) must only import from the standard library (`profiles.py` also shells out to the `aws` CLI). `worker.py` and `discovery.py` may import from `deps.py` for the `mise_cmd` helper.
+When adding new modules, **never introduce import cycles**. Leaf modules (deps, config, incremental, plan_parser, state_age, profiles, report, history, ignore, owners, notify) must only import from the standard library (`profiles.py` also shells out to the `aws` CLI). `worker.py` and `discovery.py` may import from `deps.py` for the `mise_cmd` helper.
 
 ### Module Responsibilities
 
 | Module | What it does |
 |--------|-------------|
-| `cli.py` | Main pipeline: parse args → clean cache → setup → discover → incremental → query state ages → build DAG → execute plans → assemble results → write outputs → cleanup |
+| `cli.py` | `main()` dispatches `view`/`graph`/`list` (`commands.py`) or runs `scan()`, which calls the phases in order: clean cache → parse args (`options.py`) → setup → discover → incremental → profiles → hygiene → state ages → DAG → execute plans → assemble → hygiene annotate → `annotate_findings` → stack graphs → write outputs (+ SARIF/JUnit) → summary → alert → push → cleanup → `exit_code` |
+| `phases.py` | One function per scan phase (moved out of `cli.main()`); each prints its progress and returns plain data |
+| `findings.py` | Post-scan enrichment in a fixed order — owners, ignore rules (may turn drift clean), `partialRun` on `--unit` runs, run-over-run trend (uses post-ignore status) — and `exit_code()` for `--fail-on never/error/drift/new` |
+| `history.py` | `load_baseline()` (newest non-partial `terrahawk_*.json`, or `--baseline` path / http(s) URL) and `annotate()`: per-entry `trend` (`new`/`persisting`/`resolved`/""), `prevStatus`, `since` (carried forward while a finding persists), per-resource `isNew`. Summary counts go to `window.TERRAHAWK_META.trend` |
+| `ignore.py` | `.terrahawkignore` rules: `<unit> <address> [<attrs>] [until=DATE] [# reason]`, `*`/`?` globs with everything else literal. Attribute rules need every `changedAttrs` path covered (update/replace only). Fully ignored drift → `status: clean` + `ignoredStatus: drift`. Idempotent (restores before re-applying, so merged incremental entries follow current rules) |
+| `owners.py` | CODEOWNERS (GitHub semantics: last match wins, `dir/*` = direct children only; GitLab sections + default owners) matched against each unit's repo-relative `terragrunt.hcl` → `owners` |
+| `export.py` | SARIF (TH001 drift per resource, TH002 out-of-band, TH003 error, TH004 timeout; `partialFingerprints` = sha256(unit/address/action); stack units anchor on `terragrunt.stack.hcl`) and JUnit (suite per env/subscription, drift = failure, error/timeout = error). Ignored changes excluded |
+| `notify.py` | Slack blocks / Teams Adaptive Card summary. URL **only** from `TERRAHAWK_WEBHOOK_URL` (https required), never printed; `--notify-on new` (default) sends only when `trend == new` exists. Failures warn, never fail the scan |
 | `config.py` | Loads `.terrahawk.yml` (simple YAML parser, no pyyaml dependency), detects config directory by walking common Terragrunt layouts |
 | `deps.py` | Checks required tools (terraform, terragrunt) and optional tools (az, aws, gcloud), captures versions. Provides `mise_cmd()` helper to wrap commands with `mise exec tool@version --` when version pinning is active |
 | `discovery.py` | Finds units via `terragrunt find --json --dependencies` (rglob fallback), builds dependency DAG via Kahn's algorithm |
@@ -244,7 +278,7 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 | `state_age.py` | Queries remote state backends for last-modified dates. Scoped to `remote_state.config` block to avoid matching provider block values. Resolves `${local.X}` interpolations via sibling HCL files |
 | `profiles.py` | Multi-account scanning. `build_unit_profile_map()` maps each unit → AWS profile: 1 profile short-circuits (all units, no STS); 2+ resolve each profile's account via `aws sts get-caller-identity` and each unit's account from its nearest `env.hcl` (`aws_account_id`, handling `get_env`/literal/`local.X`), then match. `state_bucket_profile()` picks the profile owning the state bucket (root.hcl `state_account_id`) for the cross-account state-age listing |
 | `report.py` | Writes a companion `_data.js` file and generates the HTML report that loads it via `<script src>`. Config flags injected via `%%PLACEHOLDER%%` substitution |
-| `tui.py` | Curses-based terminal viewer for JSON reports. Launched via `terrahawk view [report]`. Modes: list (grouped by env/sub, coverage bar, status/sub/tag/search filters, sort), detail (scrollable diffs with wrap toggle), plan (expandable per-resource diffs with action/type filters), module (tabular providers/inputs/outputs/tags), diagram (in-terminal or browser). Mouse and resize support |
+| `tui/` | Curses-based terminal viewer for JSON reports. Launched via `terrahawk view [report]`. Modes: list (grouped by env/sub, coverage bar, status/sub/tag/search filters, sort), detail (scrollable diffs with wrap toggle), plan (expandable per-resource diffs with action/type filters), module (tabular providers/inputs/outputs/tags), diagram (in-terminal or browser). Mouse and resize support |
 | `push.py` | Publishes the report triple (JSON + HTML + `_data.js`) to a Terrakettle server via `POST /api/v1/runs` (stdlib `urllib`, hand-rolled multipart, Bearer token). `maybe_push()` runs after the scan when `--push-url` is set; failures warn but never fail the scan |
 
 ### Execution Pipeline
@@ -267,9 +301,11 @@ When adding new modules, **never introduce import cycles**. Leaf modules (deps, 
 12. Execute plans (ThreadPoolExecutor, wave-by-wave or all-at-once; Terragrunt provider cache unless --no-provider-cache)
 13. Process results (plan parsing, diagrams, tags, error classification, etc.)
 14. Merge incremental results from previous report
-15. Write JSON + manifest + HTML report
+14b. Annotate findings: owners (CODEOWNERS) → ignore rules → partialRun (--unit) → trend vs baseline
+15. Write JSON + manifest + HTML report (+ SARIF / JUnit when requested)
+15b. Slack/Teams alert (TERRAHAWK_WEBHOOK_URL) and Terrakettle push
 16. Cleanup tmp dir, restore .terraform.lock.hcl files, remove generated .terragrunt-stack trees
-17. Return exit code per --fail-on (0, or 2 on findings); propagated by both entrypoints
+17. Return exit code per --fail-on (never/error/drift/new → 0, or 2 on findings); propagated by both entrypoints
 ```
 
 ### HTML Report Template
@@ -338,7 +374,7 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 
 **Thread-based parallelism**: Plans run in a `ThreadPoolExecutor` because they're I/O-bound (subprocess calls). The GIL is not a bottleneck.
 
-**Multi-account profiles** (`--profile NAME`, repeatable; or `aws_profiles: a,b` in `.terrahawk.yml`): scan several AWS accounts into ONE report. `build_unit_profile_map()` (`profiles.py`) maps unit → profile by account; `cli.main()` stores it on `args.unit_profiles` and `worker.run_plan()` injects `AWS_PROFILE` into `plan_env` per unit (covers plan, init retry, render). A single profile applies to every unit with no STS calls; 2+ resolve profile↔account via `aws sts get-caller-identity` and unit↔account via `env.hcl`. Units whose account matches no profile fall back to the default credential chain (warned). The state-age listing runs once under `state_bucket_profile()` (the bucket owner). Replaces the old workaround of running terrahawk once per profile with `--exclude` and getting separate reports.
+**Multi-account profiles** (`--profile NAME`, repeatable; or `aws_profiles: a,b` in `.terrahawk.yml`): scan several AWS accounts into ONE report. `build_unit_profile_map()` (`profiles.py`) maps unit → profile by account; `phases.resolve_profiles()` stores it on `args.unit_profiles` and `worker.run_plan()` injects `AWS_PROFILE` into `plan_env` per unit (covers plan, init retry, render). A single profile applies to every unit with no STS calls; 2+ resolve profile↔account via `aws sts get-caller-identity` and unit↔account via `env.hcl`. Units whose account matches no profile fall back to the default credential chain (warned). The state-age listing runs once under `state_bucket_profile()` (the bucket owner). Replaces the old workaround of running terrahawk once per profile with `--exclude` and getting separate reports.
 
 **DAG execution**: Kahn's algorithm produces topological waves. Units within a wave run in parallel; waves run sequentially. Circular dependencies are caught and placed in a final wave.
 
@@ -350,15 +386,21 @@ Multi-stage build producing **per-cloud images** (`--build-arg CLOUD=aws|azure|g
 
 **No-hooks mode** (`--no-hooks`): adds `--no-hooks` to the per-unit `terragrunt plan` (`worker.py`), skipping `before_hook`/`after_hook`/`error_hook` blocks for a pure read-only drift scan. Opt-in, default off; needs Terragrunt ≥1.0.8. Below 1.2 it is experimental, so `--experiment=optional-hooks` is prepended; on 1.2+ (GA) it is not. Older terragrunt will error if the flag is passed — keep it opt-in.
 
-**Terragrunt version gating**: `cli.main()` parses the detected Terragrunt version into `args.tg_version` (`parse_version()` in `deps.py`; `1.2.0-rc3` → `(1, 2, 0)`). `worker.TG_GRADUATED = (1, 2, 0)` gates flags for experiments that graduated in 1.2: `--dependency-fetch-output-from-state` (default on in 1.2, deprecated — errors under strict mode) and `--experiment=optional-hooks` are only passed below 1.2. Unknown version → legacy flags (they still work on 1.2, with warnings).
+**Terragrunt version gating**: `cli.scan()` parses the detected Terragrunt version into `args.tg_version` (`parse_version()` in `deps.py`; `1.2.0-rc3` → `(1, 2, 0)`). `worker.TG_GRADUATED = (1, 2, 0)` gates flags for experiments that graduated in 1.2: `--dependency-fetch-output-from-state` (default on in 1.2, deprecated — errors under strict mode) and `--experiment=optional-hooks` are only passed below 1.2. Unknown version → legacy flags (they still work on 1.2, with warnings).
 
 **Terraform/OpenTofu binary resolution**: the worker's follow-up `show -json` / `output -json` calls must use the same binary Terragrunt planned with, or the plan file / `.terraform` dir won't match and JSON is silently lost. `resolve_tf_binary()` (`deps.py`) mirrors Terragrunt's precedence: `TG_TF_PATH` / legacy `TERRAGRUNT_TFPATH` → the unit's `terraform_binary` (from `render_json`) → `tofu` if on PATH → `terraform`. These calls also run with the unit's `plan_env` (they read remote state, so multi-account units need their `AWS_PROFILE`). With `--terraform-version`, `pinned_tf_env()` sets `TG_TF_PATH=terraform` and the terragrunt commands run under `mise exec terragrunt@X terraform@Y --`, so the pinned Terraform is what the plan actually uses. `check_dependencies()` accepts either `terraform` or `tofu`.
 
-**Refresh guard**: a drift scan must refresh every resource. `strip_refresh_defeating_args()` (`deps.py`) removes `-refresh=false` and `-minimal-refresh` (Terraform 1.17) from `TF_CLI_ARGS` / `TF_CLI_ARGS_plan` in `os.environ` at startup (`cli.main()`, warned), so every child process inherits the sanitized env. Terragrunt `extra_arguments` can still inject them — out of reach. `engine_warnings()` flags known-broken engines (OpenTofu 1.13.0: `show -json <planfile>` fails with ephemeral resources → text fallback, no out-of-band drift).
+**Refresh guard**: a drift scan must refresh every resource. `strip_refresh_defeating_args()` (`deps.py`) removes `-refresh=false` and `-minimal-refresh` (Terraform 1.17) from `TF_CLI_ARGS` / `TF_CLI_ARGS_plan` in `os.environ` at startup (`phases.print_banner()`, warned), so every child process inherits the sanitized env. Terragrunt `extra_arguments` can still inject them — out of reach. `engine_warnings()` flags known-broken engines (OpenTofu 1.13.0: `show -json <planfile>` fails with ephemeral resources → text fallback, no out-of-band drift).
 
 **HCL hygiene**: every scan runs `terragrunt hcl validate --json` + `terragrunt hcl format --check` once over the tree (`hygiene.py`). Findings map to units by path prefix → `hclIssues` / `unformattedFiles` entry fields → `hcl N` / `fmt` badges (HTML) and detail sections (TUI). Root-level findings print as console warnings. Silently skipped on pre-1.x terragrunt.
 
 **Error classification**: Exit code 0 = clean, 2 = drift, 124/137 = timeout, anything else = error. Error output is extracted by matching Terraform error block patterns.
+
+**Rate-limit retries** (`--throttle-retries N`, default 2): `plan_parser.is_throttled()` matches provider throttling (`Throttling`, `TooManyRequests`, `Rate exceeded`, `RequestLimitExceeded`, `rateLimitExceeded`, case-sensitive `SlowDown`, `status/error/http … 429`). `run_plan()` re-runs a failed throttled plan after `_THROTTLE_BACKOFF` (15/45/90/180s + ≤25% jitter), skipping a retry that would overrun the unit timeout; `throttle_retries` → entry `throttleRetries`. Still-throttled errors classify as `throttled` (checked before `auth`).
+
+**Run-over-run, ignore, owners** (`findings.py`): the JSON report stays a plain list (TUI, `list`, push read it); run-level data (baseline name/date, trend counts) goes to `window.TERRAHAWK_META` in `_data.js`. `--unit` runs mark entries `partialRun` so `load_baseline()` skips them. `changedAttrs` (attribute **names** only, from `plan_parser.changed_attr_paths()`, capped at 100) on plan resources and `driftedResources` powers attribute ignore rules and SARIF messages.
+
+**Secrets**: webhook URLs come only from `TERRAHAWK_WEBHOOK_URL`; `options.parse_args()` warns and ignores any `webhook*` key in `.terrahawk.yml`. Never add a CLI flag or config key for it.
 
 ## Version Management
 
@@ -381,6 +423,10 @@ AWS image on every push/PR. Before submitting changes, verify:
 pip install -e '.[test]'
 pytest -q
 
+# Report browser smoke test (headless Chromium, every theme)
+pip install -e '.[test,browser]' && playwright install chromium
+pytest -q -m browser
+
 # Basic CLI
 python3 terrahawk.py --version
 python3 terrahawk.py --help
@@ -400,4 +446,5 @@ docker run --rm terrahawk:aws --version
 - **Silent failures in state_age**: Always print diagnostic warnings when CLI commands fail. Never use bare `except Exception: pass`.
 - **AWS CLI path issues in Docker**: The AWS CLI v2 installer hardcodes paths. Install-time paths must match final image paths.
 - **Cloud credential mounts**: `.aws`, `.azure`, `.config/gcloud` must be mounted **read-write** (not `:ro`) because some CLIs write token cache files.
-- **Template changes**: The HTML template is a single file with inline CSS/JS. Test with both dark and light themes after changes.
+- **Template changes**: The HTML template is a single file with inline CSS/JS. Run the browser smoke test (`pytest -m browser`, needs `pip install -e '.[test,browser]' && playwright install chromium`) — it renders a fixture report in all four themes and fails on any JS error. Badges shared by flat rows and stack leaves go in `trendBadges()` so both renderers stay in sync.
+- **detect_config_dir fallback**: the "common ancestor" fallback walks up from the first `rglob` hit and stops at the first dir with >1 units — not the true common ancestor, and `rglob` order differs across Python versions. Tests should use a standard layout (`terragrunt/root.hcl`).

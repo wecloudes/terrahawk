@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Since last run.** Each scan is compared with a baseline report — by default the newest full report in `terrahawk_results/`, or `--baseline PATH|URL` (the previous run's published JSON, for fresh CI runners). Entries get `trend` (`new` / `persisting` / `resolved`), `prevStatus` and `since` (first-seen date, carried forward while the finding persists); resource changes not in the baseline get `isNew`. The report adds a "Since last run" chip bar, NEW / *N*d / resolved badges, a trend filter and "+N new" on the stat cards; the TUI shows `N`/`R` markers and a "Since last run" line. `--unit` reports are flagged `partialRun` and never used as a baseline. New `--fail-on new` gates only on new drift/errors (`history.py`).
+- **Ignore known drift** (`.terrahawkignore`, `--ignore-file`). Rules match unit, resource address and (optionally) changed attribute paths, with `until=` expiry and a `# reason`. A drift unit whose every change is ignored is reported clean (`ignoredStatus` keeps the original), so accepted drift stops failing `--fail-on` and triggering alerts; ignored changes stay visible, dimmed, with an `ign N` badge. Expired and unused rules are printed (`ignore.py`).
+- **Unit owners from CODEOWNERS** (`--codeowners` to override the location). GitHub matching rules, GitLab sections. Owners show as a chip on every unit, with an owner filter and owner search in the report, and flow into alerts, SARIF and JUnit (`owners.py`).
+- **SARIF and JUnit outputs** (`--sarif PATH`, `--junit PATH`). SARIF 2.1.0 for GitHub code scanning — one result per drifted resource, out-of-band change, failed or timed-out unit, with stable fingerprints; JUnit for GitLab, Azure DevOps and Jenkins test views (`export.py`).
+- **Slack / Teams alerts** (`--notify-on new|findings|never`, `--report-url`). The webhook URL is read only from `TERRAHAWK_WEBHOOK_URL` (CI secret store), required to be https, and never printed; a `webhook*` key in `.terrahawk.yml` is ignored with a warning. Teams payloads are Adaptive Cards for Teams Workflows webhooks (`notify.py`).
+- **Provider rate-limit retries** (`--throttle-retries N`, default 2). Plans failing on API throttling (`Throttling`, `429`, `TooManyRequests`, `rateLimitExceeded`, `SlowDown`, …) are re-run with jittered backoff (15s / 45s / …) within the unit timeout. Retried units show a `↻ N` badge; still-throttled units classify as the new `throttled` error class.
+- **`changedAttrs`** on plan resources and out-of-band drift: the attribute *names* that differ (values are never written). Shown as a tooltip in the plan popup.
+- **Browser smoke test** for the HTML report (`tests/test_report_browser.py`, optional `browser` extra + CI job): renders a fixture report in headless Chromium in all four themes and fails on JS errors, missing UI or broken diagrams.
+
+### Changed
+
+- **`cli.py` split.** `main()` is now subcommand dispatch plus a `scan()` orchestrator that reads as a list of phases; options moved to `options.py`, `view`/`graph`/`list` to `commands.py`, the phases to `phases.py`, and post-scan enrichment plus the exit code to `findings.py`. Behaviour is unchanged.
+- **`tui.py` became the `tui/` package**, one module per view (`listing`, `detail`, `plan`, `module_info`, `diagram`, `prompt`, shared `common`, loop in `app`). Code moved verbatim; `from terrahawk.tui import run_tui` still works.
+- The report's CSV export adds Trend, Since, Owners and Ignored columns.
+
+### Tests
+
+- New coverage for history, ignore rules, CODEOWNERS matching, SARIF/JUnit, alerts (including that the URL never leaks into output), throttle detection and retry/backoff budget, `changedAttrs`, TUI formatters, and a hermetic two-run end-to-end `scan()` test. Suite is 289 tests (280 without the browser extra).
+
 ## [1.8.3] - 2026-11-03
 
 ### Fixed

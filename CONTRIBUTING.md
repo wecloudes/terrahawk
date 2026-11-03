@@ -98,7 +98,16 @@ terrahawk/
 ├── src/terrahawk/
 │   ├── __init__.py              # __version__, re-export main
 │   ├── __main__.py              # python -m terrahawk
-│   ├── cli.py                   # Main pipeline orchestration
+│   ├── cli.py                   # Subcommand dispatch + scan orchestrator
+│   ├── options.py               # Scan CLI options
+│   ├── commands.py              # view / graph / list subcommands
+│   ├── phases.py                # Scan pipeline phases
+│   ├── findings.py              # Owners, ignore rules, trend; exit code
+│   ├── history.py               # Run-over-run comparison
+│   ├── ignore.py                # .terrahawkignore rules
+│   ├── owners.py                # CODEOWNERS → owners
+│   ├── export.py                # SARIF + JUnit
+│   ├── notify.py                # Slack / Teams alerts
 │   ├── config.py                # Config file loading, config dir detection
 │   ├── deps.py                  # Dependency checking, version detection
 │   ├── discovery.py             # Unit discovery, DAG builder
@@ -108,7 +117,7 @@ terrahawk/
 │   ├── process.py               # Result processing (imports plan_parser)
 │   ├── state_age.py             # Remote state age queries (Azure/AWS/GCS)
 │   ├── report.py                # HTML report generation
-│   ├── tui.py                   # Terminal UI viewer (curses-based)
+│   ├── tui/                     # Terminal UI viewer (curses-based, one module per view)
 │   └── templates/
 │       ├── report.html          # HTML report template
 │       ├── eagle.svg            # Logo (light theme)
@@ -121,11 +130,13 @@ terrahawk/
 ### Import Graph (strict DAG, no cycles)
 
 ```
-cli.py ──→ config.py, deps.py, discovery.py, incremental.py,
-           worker.py, process.py, state_age.py, report.py, tui.py
-worker.py ──→ deps.py (mise_cmd helper)
+cli.py ──→ options.py, commands.py, phases.py, findings.py, export.py, notify.py, ...
+phases.py ──→ discovery.py, worker.py, process.py, report.py, state_age.py, ...
+findings.py ──→ history.py, ignore.py, owners.py
+commands.py ──→ tui/ (lazy, `view` only)
+worker.py ──→ deps.py (mise_cmd helper), plan_parser.py (is_throttled)
 process.py ──→ plan_parser.py
-(all other modules: only stdlib)
+(leaf modules: only stdlib — see CLAUDE.md for the full graph)
 ```
 
 ## Coding Standards

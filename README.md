@@ -25,10 +25,16 @@ Designed to run on a daily schedule via CI/CD (GitHub Actions, GitLab CI, Azure 
 - **Dependency-Aware Execution** (on by default, `--no-dag` to disable) — Parses `dependency` blocks to build a DAG and executes units in topological waves, ensuring correct plan order. When there are no cross-unit dependencies it falls back to flat parallelism automatically.
 - **Encoding-Only Change Detection** — Planned changes whose only difference is a base64-gzip string that decodes to identical content (e.g. `user_data_base64 = base64gzip(...)` after Terragrunt 1.2 / OpenTofu 1.13 switched to the Go 1.27 gzip encoder) get a blue `gz` badge and a per-resource "gzip re-encode only" tag. The action still counts as drift — a replace-on-change will really replace the instance — but the report shows that the content didn't change. `base64gzip_compat()` keeps the old bytes.
 - **Full Refresh Enforced** — `-refresh=false` and Terraform 1.17's `-minimal-refresh` hide out-of-band drift, so they are stripped from an inherited `TF_CLI_ARGS` / `TF_CLI_ARGS_plan` (with a warning). Flags injected via Terragrunt `extra_arguments` are not touched.
-- **Error Taxonomy** — Failed units are classified (`config`, `auth`, `init`, `dependency`, `plan`, `timeout`) and the report shows a per-class breakdown, so failures are triageable at a glance instead of one undifferentiated "error" bucket.
-- **CI Gating** (`--fail-on drift|error`) — Exit non-zero (code `2`) when the scan finds drift or errors, so a scheduled scan can fail a pipeline. Default `never` (always exit `0`).
+- **Error Taxonomy** — Failed units are classified (`config`, `auth`, `init`, `dependency`, `throttled`, `plan`, `timeout`) and the report shows a per-class breakdown, so failures are triageable at a glance instead of one undifferentiated "error" bucket.
+- **CI Gating** (`--fail-on drift|error|new`) — Exit non-zero (code `2`) when the scan finds drift or errors — or, with `new`, only drift/errors that weren't there in the previous run — so a scheduled scan can fail a pipeline. Ignored drift never fails. Default `never` (always exit `0`).
+- **Since Last Run** (`--baseline`) — Every scan is compared with the previous report: drift and errors are marked **NEW**, **persisting** (with how many days) or **resolved**, and individual resource changes not seen before are tagged `new`. The report shows a "Since last run" chip bar and a trend filter. By default the baseline is the newest full report in `terrahawk_results/`; in CI, point `--baseline` at the previous run's published JSON (path or `https://` URL). `--unit` reports are never used as a baseline.
+- **Ignore Known Drift** (`.terrahawkignore`) — Accepted drift (tags owned by a tagging service, autoscaling counts, ...) is suppressed by unit / address / attribute rules with an optional `until=` expiry. Ignored changes stay visible but dimmed; a unit whose every change is ignored counts as clean. Expired and unused rules are reported. See [Ignoring known drift](#ignoring-known-drift).
+- **Owners** — Units are mapped to owners from the repo's `CODEOWNERS` (GitHub rules; GitLab sections supported). Owners show on every unit, in alerts, SARIF and JUnit, and the report can be filtered by owner.
+- **SARIF & JUnit** (`--sarif PATH`, `--junit PATH`) — CI-native findings: SARIF 2.1.0 for GitHub code scanning (one alert per drifted resource / failed unit, stable fingerprints across runs), JUnit XML for GitLab, Azure DevOps and Jenkins test views.
+- **Slack / Teams Alerts** — A summary is posted when new drift or errors appear (`--notify-on new|findings|never`). The webhook URL is read **only** from the `TERRAHAWK_WEBHOOK_URL` environment variable (inject it from your CI secret store) — never from `.terrahawk.yml` — and is never printed. Teams uses Adaptive Cards (Teams Workflows webhooks).
+- **Rate-Limit Retries** (`--throttle-retries N`, default `2`) — Units that fail on provider API throttling (`Throttling`, `429`, `TooManyRequests`, `rateLimitExceeded`, ...) are re-planned with jittered backoff within their timeout, instead of being reported as plan errors. Units still throttled after the retries are classified `throttled`.
 - **Terragrunt Stacks** (auto, `--no-stacks` to disable) — Explicit stacks (`terragrunt.stack.hcl`) are auto-materialised via `terragrunt stack generate` before discovery, so their generated units are drift-scanned like any other unit. Stack units get a `▤ stack · <name>` badge, and each stack renders a **units-in-stack** Mermaid diagram (members coloured by status, intra-stack dependency edges) from a "▤ Stacks" chip bar. Generated trees are cleaned up afterwards. Requires Terragrunt 1.x.
-- **Dark/Light Theme** — Toggle in the report header, persisted via localStorage.
+- **Themes** — Dark, Light, Tokyo Night and Cyberpunk from the header menu, persisted via localStorage; `?theme=<name>` opens a report in a given theme.
 - **CSV Export** — Export filtered results directly from the report.
 - **Terminal Viewer** (`terrahawk view`) — Interactive curses-based TUI to browse scan results directly in the terminal:
   - Units grouped by environment/subscription with status badges and coverage bar
@@ -200,7 +206,15 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | `--no-stacks` | `false` | Skip `terragrunt stack generate` for `terragrunt.stack.hcl` files. By default stacks are auto-generated before discovery so their units are drift-scanned (Terragrunt 1.x) |
 | `--terraform-version` | System default | Pin Terraform to a specific version via [mise](https://mise.jdx.dev) |
 | `--terragrunt-version` | System default | Pin Terragrunt to a specific version via [mise](https://mise.jdx.dev) |
-| `--fail-on` | `never` | Exit with a nonzero status for CI gating: `never`, `drift` (exit nonzero on any drift), or `error` (exit nonzero only on unit errors) |
+| `--fail-on` | `never` | Exit with a nonzero status for CI gating: `never`, `drift` (any drift or error), `error` (only unit errors/timeouts), or `new` (only drift/errors new since the baseline) |
+| `--baseline` | newest full report | Previous JSON report to compare against (local path or `http(s)://` URL) |
+| `--ignore-file` | `.terrahawkignore` | Known-drift ignore rules, relative to the root dir |
+| `--codeowners` | auto | CODEOWNERS file for unit owners (default: `.github/`, root, `docs/`, `.gitlab/`) |
+| `--sarif` | `None` | Also write findings as SARIF 2.1.0 |
+| `--junit` | `None` | Also write a JUnit XML report |
+| `--notify-on` | `new` | When to post the Slack/Teams summary (`new`, `findings`, `never`); needs `TERRAHAWK_WEBHOOK_URL` |
+| `--report-url` | `None` | Link to the published report in alerts (a URL ending in `/` gets the report file name appended) |
+| `--throttle-retries` | `2` | Re-plans after provider API rate limiting (`0` disables) |
 | `--diagram-assets` | `inline` | Where diagram data lives: `inline` embeds Mermaid in the HTML, `sidecar` writes it once beside the report |
 | `--push-url` | `None` | Publish the report to a [Terrakettle](../terrakettle) server after the scan |
 | `--push-token` | `$TERRAKETTLE_TOKEN` | Per-project Terrakettle push token |
@@ -211,6 +225,8 @@ usage: terrahawk [-h] [-r ROOT_DIR] [-u UNIT] [-p PARALLELISM] [-t TIMEOUT]
 | Command | Description |
 |---------|-------------|
 | `terrahawk view [report]` | Open the TUI to browse results in the terminal. Loads the latest report by default, or specify a report name/path. |
+| `terrahawk graph [-o FILE.html]` | Print the unit dependency graph as Mermaid (or write HTML) |
+| `terrahawk list` | Unit inventory with the last report's status (no scan) |
 
 ---
 
@@ -292,7 +308,15 @@ diagrams: true     # embed architecture diagrams (default: true; set false to di
 tags: true
 incremental: false
 dag: true          # dependency-ordered execution (default: true; set false to disable)
-fail_on: never     # never | drift | error — exit code 2 on findings, for CI gating
+fail_on: never     # never | drift | error | new — exit code 2 on findings, for CI gating
+baseline: ""       # previous report to compare against (path or https URL; default: newest in terrahawk_results/)
+ignore_file: .terrahawkignore
+codeowners: ""     # default: auto-detect .github/CODEOWNERS, CODEOWNERS, docs/, .gitlab/
+sarif: ""          # e.g. terrahawk.sarif
+junit: ""          # e.g. terrahawk-junit.xml
+notify_on: new     # new | findings | never  (webhook URL: TERRAHAWK_WEBHOOK_URL env var ONLY)
+report_url: ""     # where the published report lives, linked from alerts
+throttle_retries: 2
 diagram_assets: inline   # inline | sidecar — embed Mermaid in the HTML, or write it once beside the report
 exclude: "bootstrapping|test"
 no_hooks: false    # skip before/after/error hooks (read-only drift scan)
@@ -335,6 +359,33 @@ The HTML + `_data.js` pair work everywhere: `file://`, S3, Azure Blob, GCS, any 
 
 When using `--incremental`, a `.manifest` file is also written to track file hashes between runs.
 
+Each JSON entry carries the run-over-run fields `trend` (`new` / `persisting` / `resolved` / empty), `prevStatus` and `since` (date the current finding was first seen), plus `owners`, `ignoredCount` / `ignoredStatus`, and per-resource `isNew` / `ignored` / `changedAttrs` (attribute names only — values are never written).
+
+### Ignoring known drift
+
+Put a `.terrahawkignore` in the repository root (or point `--ignore-file` elsewhere). One rule per line:
+
+```
+# <unit> <address> [<attr>[,<attr>...]] [until=YYYY-MM-DD] [# reason]
+*                *                          tags,tags_all      # tags owned by the tagging service
+prod/*           aws_autoscaling_group.*    desired_capacity   # autoscaling
+shared/vpc       aws_security_group.legacy  until=2026-12-31   # removal ticket open
+```
+
+- `<unit>` matches the unit path, `<address>` the resource address. `*` matches anything (including `/` and `.`), `?` one character; everything else is literal — `aws_instance.web["a"]` needs no escaping.
+- Without attributes the whole resource change is ignored. With attributes, an update/replace is ignored only when **every** changed attribute is covered (`tags` also covers `tags.Owner`). Creates and deletes are never ignored by attribute rules.
+- `until=` makes a rule expire (inclusive) so accepted drift resurfaces; expired rules and rules that matched nothing are printed after a full scan.
+- A drift unit whose every planned change is ignored is reported **clean** (the JSON keeps `ignoredStatus: "drift"`), so it no longer trips `--fail-on` or alerts.
+
+### Alerts
+
+```bash
+export TERRAHAWK_WEBHOOK_URL=...   # from your CI secret store — never commit it
+terrahawk --notify-on new --report-url https://reports.example.com/terrahawk/
+```
+
+The kind is detected from the URL (`hooks.slack.com` → Slack, otherwise Teams); override with `TERRAHAWK_WEBHOOK_KIND=slack|teams`. A failed post prints a warning without the URL and never fails the scan. A `webhook*` key in `.terrahawk.yml` is ignored with a warning — rotate that webhook.
+
 ### Publishing to Terrakettle
 
 Pass `--push-url` (and a token via `--push-token` or `$TERRAKETTLE_TOKEN`) to publish the report to a [Terrakettle](../terrakettle) server, which stores run history per project and serves the interactive HTML report over the web:
@@ -365,10 +416,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Terrahawk
+        env:
+          TERRAHAWK_WEBHOOK_URL: ${{ secrets.TERRAHAWK_WEBHOOK_URL }}
         run: |
+          # Compare with yesterday's published report (fresh runners have no history).
           docker run --rm \
+            -e TERRAHAWK_WEBHOOK_URL \
             -v "${{ github.workspace }}":/workspace \
-            terrahawk:aws --root-dir /workspace --tags --dag
+            terrahawk:aws --root-dir /workspace --tags \
+              --baseline https://reports.example.com/terrahawk/latest.json \
+              --sarif /workspace/terrahawk.sarif --junit /workspace/terrahawk-junit.xml
+
+      - name: Upload SARIF (code scanning annotations)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: terrahawk.sarif
+          category: terrahawk
 
       - name: Upload Report
         uses: actions/upload-artifact@v4
@@ -395,9 +459,20 @@ steps:
 
   - script: |
       docker run --rm \
+        -e TERRAHAWK_WEBHOOK_URL \
         -v "$(Build.SourcesDirectory)":/workspace \
-        terrahawk:azure --root-dir /workspace --tags
+        terrahawk:azure --root-dir /workspace --tags \
+          --junit /workspace/terrahawk-junit.xml
     displayName: Run Terrahawk
+    env:
+      TERRAHAWK_WEBHOOK_URL: $(TERRAHAWK_WEBHOOK_URL)   # secret pipeline variable / Key Vault
+
+  - task: PublishTestResults@2
+    condition: always()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: terrahawk-junit.xml
+      testRunTitle: Terrahawk drift
 
   - publish: terrahawk_results/
     artifact: terrahawk-report
@@ -415,7 +490,11 @@ terrahawk/
 ├── src/terrahawk/
 │   ├── __init__.py              # __version__, re-export main
 │   ├── __main__.py              # python -m terrahawk
-│   ├── cli.py                   # Main pipeline orchestration
+│   ├── cli.py                   # Subcommand dispatch + scan orchestrator
+│   ├── options.py               # Scan CLI options (.terrahawk.yml defaults)
+│   ├── commands.py              # view / graph / list subcommands
+│   ├── phases.py                # Scan pipeline phases
+│   ├── findings.py              # Owners, ignore rules, trend; CI exit code
 │   ├── config.py                # Config file loading, config dir detection
 │   ├── deps.py                  # Dependency checking, version detection
 │   ├── discovery.py             # Unit discovery, DAG builder
@@ -424,9 +503,14 @@ terrahawk/
 │   ├── plan_parser.py           # Terraform plan output parser
 │   ├── process.py               # Result processing and assembly
 │   ├── state_age.py             # Remote state age queries (Azure/AWS/GCS)
+│   ├── history.py               # Run-over-run comparison (new/persisting/resolved)
+│   ├── ignore.py                # .terrahawkignore rules
+│   ├── owners.py                # CODEOWNERS → unit owners
+│   ├── export.py                # SARIF + JUnit outputs
+│   ├── notify.py                # Slack / Teams webhook alerts
 │   ├── report.py                # HTML report generation
 │   ├── push.py                  # Publish report to a Terrakettle server
-│   ├── tui.py                   # Terminal UI viewer (curses-based)
+│   ├── tui/                     # Terminal UI viewer (curses; one module per view)
 │   └── templates/
 │       ├── report.html          # HTML report template
 │       ├── eagle.svg            # Logo (light theme)
