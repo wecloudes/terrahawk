@@ -19,6 +19,11 @@ _TG_GENERATED_DIRS = {".terragrunt-stack", ".terragrunt-cache"}
 #     templates for stacks, not deployable units.
 _ALWAYS_SKIP_SEGMENTS = {"catalog"}
 
+# Above this many `--unit` candidates, pre-narrowing is skipped: hundreds of
+# repeated `--filter` args bloat the command line (ARG_MAX on huge repos) and
+# a broad needle saves little of the walk anyway.
+MAX_UNIT_FILTERS = 50
+
 
 def _is_always_skipped(rel_path):
     """True when rel_path lives under a hidden dir or a module catalog.
@@ -153,10 +158,16 @@ def unit_path_filters(config_dir, unit_arg):
     if not needle:
         return None
     matches = []
-    for root, dirs, files in os.walk(config_dir):
+    # followlinks: a symlinked unit dir must be a candidate, or narrowing
+    # would silently drop it whenever some other unit matches. Aliases of the
+    # same real dir are all kept (each is a distinct rel_path to find); only
+    # links pointing back at an ancestor (cycles) are pruned.
+    for root, dirs, files in os.walk(config_dir, followlinks=True):
+        real_root = os.path.realpath(root)
         # Prune only the cache tree (it can hold thousands of module files
         # after a scan); stack members under .terragrunt-stack are real units.
-        dirs[:] = [d for d in dirs if d != ".terragrunt-cache"]
+        dirs[:] = [d for d in dirs if d != ".terragrunt-cache"
+                   and not _links_to_ancestor(os.path.join(root, d), real_root)]
         if "terragrunt.hcl" not in files:
             continue
         rel = os.path.relpath(root, config_dir).replace(os.sep, "/")
@@ -167,10 +178,21 @@ def unit_path_filters(config_dir, unit_arg):
     return sorted(set(matches)) or None
 
 
+def _links_to_ancestor(path, real_parent):
+    """True when `path` is a symlink resolving to `real_parent` or one of its
+    ancestors — following it would loop forever."""
+    if not os.path.islink(path):
+        return False
+    target = os.path.realpath(path)
+    return real_parent == target or real_parent.startswith(target.rstrip(os.sep) + os.sep)
+
+
 def _find_json(config_dir, tg_ver, filter_expr, unit_filters):
-    """Run `terragrunt find --format json --dependencies` once. Returns the
-    parsed JSON list, or None on any failure (nonzero exit, empty stdout,
-    bad JSON, timeout)."""
+    """Run `terragrunt find --format json --dependencies` once.
+
+    Returns (data, timed_out): data is the parsed JSON list, or None on any
+    failure (nonzero exit, empty stdout, bad JSON, timeout); timed_out tells
+    the caller a retry would just burn another full timeout."""
     cfg = os.path.realpath(str(config_dir))
     find_args = [
         "find", "--format", "json", "--dependencies",
@@ -184,10 +206,12 @@ def _find_json(config_dir, tg_ver, filter_expr, unit_filters):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if r.returncode != 0 or not r.stdout.strip():
-            return None
-        return json.loads(r.stdout)
+            return None, False
+        return json.loads(r.stdout), False
+    except subprocess.TimeoutExpired:
+        return None, True
     except Exception:
-        return None
+        return None, False
 
 
 def _discover_native(config_dir, tg_ver="", filter_expr=None, unit_filters=None):
@@ -195,12 +219,17 @@ def _discover_native(config_dir, tg_ver="", filter_expr=None, unit_filters=None)
     # realpath BEFORE invoking find: terragrunt emits dependency paths
     # relative to the working dir as given, computed lexically — resolving
     # symlinks afterwards would corrupt them (e.g. /tmp -> /private/tmp).
-    data = _find_json(config_dir, tg_ver, filter_expr, unit_filters)
-    if data is None and unit_filters:
-        # A path filter terragrunt rejects (odd characters in a dir name, an
-        # older find) must not silently degrade discovery to the rglob
-        # fallback (which loses `dependencies { paths }`): retry unfiltered.
-        data = _find_json(config_dir, tg_ver, filter_expr, None)
+    data, timed_out = _find_json(config_dir, tg_ver, filter_expr, unit_filters)
+    if unit_filters and not timed_out and not any(
+            isinstance(e, dict) and e.get("type") == "unit" for e in data or []):
+        # Narrowing must never change the outcome. Retry unfiltered when
+        # terragrunt rejects a path filter (odd characters in a dir name, an
+        # older find) — rather than degrading to the rglob fallback, which
+        # loses `dependencies { paths }` — or when it accepts the filters but
+        # they match no unit (path-filter semantics differing from our
+        # glob, e.g. on symlinks or dot-dirs). A timeout is not retried: a
+        # second full walk would just time out again.
+        data, _ = _find_json(config_dir, tg_ver, filter_expr, None)
     if data is None:
         return None
 

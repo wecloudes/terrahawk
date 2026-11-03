@@ -56,7 +56,7 @@ A **unit** is any subdirectory of `config_dir` that contains a `terragrunt.hcl` 
 - Unit dirs are `os.path.realpath`-resolved so dependency paths match across symlinks
 - Each unit's `rel_path` is relative to `config_dir` (e.g., `landingzones/production/westeurope/app-gateway`)
 - The `--exclude` regex is matched against `rel_path`
-- The `--unit` flag filters to a single unit by exact `rel_path` match or suffix match (e.g., `--unit app-gateway` matches `production/westeurope/app-gateway`). On Terragrunt ≥ 1.2 the candidates are pre-computed by `unit_path_filters()` (`discovery.py` — cheap `terragrunt.hcl` glob with the same match rule) and passed as `--filter` path expressions so Terragrunt narrows its filesystem walk; on filter rejection the find retries unfiltered, and `--affected` mode skips the narrowing (git + path filters would union)
+- The `--unit` flag filters to a single unit by exact `rel_path` match or suffix match (e.g., `--unit app-gateway` matches `production/westeurope/app-gateway`). On Terragrunt ≥ 1.2 the candidates are pre-computed by `unit_path_filters()` (`discovery.py` — cheap `terragrunt.hcl` glob with the same match rule) and passed as `--filter` path expressions so Terragrunt narrows its filesystem walk; the walk follows symlinks (ancestor cycles pruned); on filter rejection or an empty filtered result the find retries unfiltered (not on timeout), narrowing is skipped above `MAX_UNIT_FILTERS` (50) candidates, and `--affected` mode skips the narrowing (git + path filters would union)
 
 ### Stacks (terragrunt.stack.hcl)
 

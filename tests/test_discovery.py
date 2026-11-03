@@ -243,3 +243,57 @@ class TestDiscoverNativeUnitFilters:
         assert [rp for _, rp in units] == ["dev/app"]
         assert deps is None  # rglob fallback
         assert len(calls) == 2
+
+    def test_filtered_empty_result_retries_unfiltered(self, monkeypatch, tmp_path):
+        # terragrunt accepts the path filters but they match no unit (filter
+        # semantics differ from our glob): narrowing must not change the outcome.
+        calls = self._make_find(monkeypatch, tmp_path, [(0, "[]"), (0, self.UNIT_JSON)])
+        units, deps = discovery.discover_units(
+            tmp_path, tg_ver="", filter_expr=None, unit_filters=["./prod/app"])
+        assert [rp for _, rp in units] == ["prod/app"]
+        assert len(calls) == 2
+        assert "--filter" not in " ".join(calls[1])
+        assert deps is not None
+
+    def test_timeout_not_retried(self, monkeypatch, tmp_path):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            raise subprocess.TimeoutExpired(cmd, 120)
+
+        monkeypatch.setattr(discovery.subprocess, "run", fake_run)
+        units, deps = discovery.discover_units(
+            tmp_path, tg_ver="", filter_expr=None, unit_filters=["./prod/app"])
+        assert len(calls) == 1      # no second full-timeout walk
+        assert deps is None         # rglob fallback
+
+    def test_unfiltered_empty_result_not_retried(self, monkeypatch, tmp_path):
+        calls = self._make_find(monkeypatch, tmp_path, [(0, "[]")])
+        units, _ = discovery.discover_units(tmp_path)
+        assert units == [] and len(calls) == 1
+
+
+class TestUnitPathFiltersSymlinks:
+    def test_symlinked_unit_is_candidate(self, tmp_path):
+        real = tmp_path / "real" / "app"
+        real.mkdir(parents=True)
+        (real / "terragrunt.hcl").write_text("")
+        (tmp_path / "live").mkdir()
+        os.symlink(real, tmp_path / "live" / "app")
+        assert discovery.unit_path_filters(tmp_path, "live/app") == ["./live/app"]
+
+    def test_symlink_cycle_terminates(self, tmp_path):
+        d = tmp_path / "prod" / "app"
+        d.mkdir(parents=True)
+        (d / "terragrunt.hcl").write_text("")
+        os.symlink(tmp_path / "prod", d / "loop")    # prod/app/loop -> prod
+        assert discovery.unit_path_filters(tmp_path, "app") == ["./prod/app"]
+
+    def test_alias_and_real_dir_both_candidates(self, tmp_path):
+        real = tmp_path / "a" / "app"
+        real.mkdir(parents=True)
+        (real / "terragrunt.hcl").write_text("")
+        (tmp_path / "z").mkdir()
+        os.symlink(real, tmp_path / "z" / "app")
+        assert discovery.unit_path_filters(tmp_path, "app") == ["./a/app", "./z/app"]

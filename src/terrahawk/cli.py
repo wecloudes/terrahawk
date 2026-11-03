@@ -15,7 +15,8 @@ from . import __version__
 from .config import load_config, load_unit_timeouts, detect_config_dir
 from .deps import (check_dependencies, engine_warnings, get_versions, parse_version,
                    strip_refresh_defeating_args, version_at_least)
-from .discovery import discover_units, build_dag, generate_stacks, unit_path_filters
+from .discovery import (discover_units, build_dag, generate_stacks, unit_path_filters,
+                        MAX_UNIT_FILTERS)
 from .incremental import load_manifest, hash_file, save_manifest
 from .worker import run_plan, uses_provider_cache
 from .process import process_result, build_stack_graphs
@@ -478,7 +479,11 @@ def main():
     unit_filters = None
     if args.unit and not filter_expr and version_at_least(args.tg_version, (1, 2, 0)):
         unit_filters = unit_path_filters(config_dir, args.unit)
-        if unit_filters:
+        if unit_filters and len(unit_filters) > MAX_UNIT_FILTERS:
+            print(f"  --unit: {len(unit_filters)} candidate paths (> {MAX_UNIT_FILTERS}), "
+                  "skipping discovery narrowing")
+            unit_filters = None
+        elif unit_filters:
             print(f"  --unit: narrowing discovery to {len(unit_filters)} candidate path(s)")
     try:
         units, native_deps = discover_units(

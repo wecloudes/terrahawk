@@ -102,3 +102,16 @@ class TestGenerateReport:
         )
         html = html_report.read_text()
         assert "jsdelivr" not in html
+
+
+class TestThemeBootstrap:
+    def test_first_paint_theme_is_whitelisted(self):
+        html = report.get_html_template()
+        head = html.split("</script>", 1)[0]
+        # ?theme= / localStorage values are only applied when known
+        assert "ok.indexOf(t)" in head
+        for theme in ("dark", "light", "tokyo-night", "cyberpunk"):
+            assert f"'{theme}'" in head
+        # head whitelist stays in sync with the THEMES menu
+        for theme_id in re.findall(r"\{id:'([\w-]+)'", html):
+            assert f"'{theme_id}'" in head
