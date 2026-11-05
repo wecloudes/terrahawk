@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-11-05
+
+### Security
+
+- **Sensitive outputs are masked.** `terraform output -json` marks secrets `sensitive: true`, but the flag was dropped and the value was written in clear text to the JSON report, `_data.js` and anything pushed to Terrakettle. Such outputs now keep their name with the value `(sensitive value)`, and a new `sensitiveOutputs` entry field lists their names. Reports generated before this change may still contain secret output values; regenerate and republish them.
+
 ## [1.9.1] - 2026-11-03
 
 ### Added

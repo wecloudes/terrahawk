@@ -80,7 +80,7 @@ After `terragrunt plan`, the worker (`worker.py`) collects additional data from 
 | Input variables | `variables.tf` in cache dir | Inputs table in module info |
 | Resource tags | `terraform show -json` (state JSON) | Tag extraction and filtering |
 | Resource count | `terraform show -json` (recursive module count) | Resource count badge |
-| Outputs | `terraform output -json` | Outputs table in module info |
+| Outputs | `terraform output -json` | Outputs table in module info. `sensitive: true` outputs keep their name, value masked as `(sensitive value)`; names listed in `sensitiveOutputs` |
 | Module source | `source = "..."` in unit's `terragrunt.hcl` | Module source display |
 | Architecture diagram | Built from `plan_json` + `state_json` (always generated; `--diagrams`/`--no-diagrams`, default on, only toggles report visibility) | Mermaid diagram |
 | Error class | `_classify_error(status, error)` in `process.py` — regex over the error text | `errorClass` entry field (`config`/`auth`/`init`/`dependency`/`plan`/`timeout`/`other`, `""` when not failed) → per-class error breakdown chips in the HTML report |

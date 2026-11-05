@@ -150,14 +150,32 @@ def _process_tags(raw, args):
     return tags, default_tags
 
 
+_SENSITIVE_OUTPUT_MASK = "(sensitive value)"
+
+
 def _process_outputs(raw):
-    """Extract outputs from terraform output JSON."""
+    """Extract outputs from terraform output JSON.
+
+    Returns ``(outputs, sensitive_names)``. Outputs terraform flags
+    ``sensitive: true`` keep their name but the value is masked — the report is
+    published to static storage and pushed to Terrakettle, so a secret must
+    never reach it. ``sensitive_names`` lets consumers tell "masked" from a
+    literal string.
+    """
     outputs = {}
+    sensitive = []
     od = raw.get("outputs_json")
     if od:
         for k, v in od.items():
-            outputs[k] = v.get("value", v) if isinstance(v, dict) else v
-    return outputs
+            if isinstance(v, dict) and "value" in v:
+                if v.get("sensitive"):
+                    outputs[k] = _SENSITIVE_OUTPUT_MASK
+                    sensitive.append(k)
+                else:
+                    outputs[k] = v["value"]
+            else:
+                outputs[k] = v
+    return outputs, sorted(sensitive)
 
 
 _SECRET_INPUT_RE = re.compile(
@@ -669,7 +687,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
 
     plan_diagram = _generate_plan_diagram(raw, plan_resources)
     tags, default_tags = _process_tags(raw, args)
-    outputs = _process_outputs(raw)
+    outputs, sensitive_outputs = _process_outputs(raw)
     inputs = _process_inputs(raw)
     providers, tf_version = _process_providers(raw, root_provider_tpl)
     module_source = _process_module_source(raw)
@@ -686,7 +704,7 @@ def process_result(raw, args, blob_dates, root_provider_tpl=""):
         "planDiagram": plan_diagram,
         "tags": tags if args.tags else None,
         "defaultTags": default_tags if args.tags else {},
-        "inputs": inputs, "outputs": outputs,
+        "inputs": inputs, "outputs": outputs, "sensitiveOutputs": sensitive_outputs,
         "providers": providers, "tfVersion": tf_version,
         "moduleSource": module_source, "resourceCount": resource_count,
         "stateAgeDays": state_age_days,

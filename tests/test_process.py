@@ -123,3 +123,28 @@ class TestThrottledClass:
 
     def test_timeout_status_stays_timeout(self):
         assert process._classify_error("timeout", "429 Too Many Requests") == "timeout"
+
+
+class TestProcessOutputs:
+    def test_plain_output_keeps_value(self):
+        raw = {"outputs_json": {"vpc_id": {"value": "vpc-1", "sensitive": False, "type": "string"}}}
+        assert process._process_outputs(raw) == ({"vpc_id": "vpc-1"}, [])
+
+    def test_sensitive_output_is_masked_and_listed(self):
+        raw = {"outputs_json": {
+            "db_password": {"value": "hunter2", "sensitive": True, "type": "string"},
+            "endpoint": {"value": "db.example", "sensitive": False, "type": "string"},
+        }}
+        outputs, sensitive = process._process_outputs(raw)
+        assert outputs == {"db_password": "(sensitive value)", "endpoint": "db.example"}
+        assert sensitive == ["db_password"]
+        assert "hunter2" not in str(outputs)
+
+    def test_sensitive_object_output_masked_as_a_whole(self):
+        raw = {"outputs_json": {"creds": {"value": {"user": "a", "pw": "b"}, "sensitive": True}}}
+        outputs, sensitive = process._process_outputs(raw)
+        assert outputs == {"creds": "(sensitive value)"} and sensitive == ["creds"]
+
+    def test_missing_or_empty_outputs(self):
+        assert process._process_outputs({}) == ({}, [])
+        assert process._process_outputs({"outputs_json": {}}) == ({}, [])
